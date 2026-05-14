@@ -1,0 +1,13 @@
+# Python virtualenv for the data-prep script (machine-specific, recreate with
+# `python3 -m venv .venv && .venv/bin/pip install shapely requests`).
+.venv/
+
+# Data backups produced ad-hoc during development.
+data/*.bak
+
+# Data-prep script kept out of the published site — the static GeoJSONs in
+# data/ are the only artifacts the page needs.
+scripts/
+
+# macOS metadata
+.DS_Store

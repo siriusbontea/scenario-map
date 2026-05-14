@@ -1,0 +1,330 @@
+html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+/* Map backdrop = textured "ocean". Solid dark navy + a tiled SVG turbulence
+   filter for subtle wave-like character. The 512×512 tile (with the SVG
+   filter's stitchTiles='stitch' attribute) gives wraparound noise that
+   tiles seamlessly: the right edge mathematically matches the left, and
+   the bottom matches the top, so no visible square seams appear. */
+#map {
+  position: absolute; inset: 0;
+  background-color: #1a2332;
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512'><filter id='o' x='0%25' y='0%25' width='100%25' height='100%25'><feTurbulence type='fractalNoise' baseFrequency='0.006' numOctaves='3' seed='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.18  0 0 0 0 0.42  0 0 0 0 0.85  0 0 0 0.13 0'/></filter><rect width='100%25' height='100%25' filter='url(%23o)'/></svg>");
+  background-repeat: repeat;
+  background-size: 512px 512px;
+}
+
+/* Title bar */
+.title-bar {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; background: rgba(20, 30, 48, 0.92); color: #fff;
+  padding: 8px 18px; border-radius: 4px; font-weight: 600; font-size: 14px;
+  letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.title-bar .sub { font-weight: 400; font-size: 11px; opacity: 0.75; margin-left: 8px; }
+
+/* Bottom-left stack: holds the legend (on top) and the range-rings widget
+   (below). Anchored to the map's bottom-left corner; height is content-
+   driven, so the range tool's expanding "Clear" button + hint row push the
+   legend upward instead of overlapping it. */
+.bottom-left-stack {
+  position: absolute; bottom: 10px; left: 10px; z-index: 1000;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  /* Reserve enough horizontal room for the legend's max-width but stop well
+     short of the centered coords readout. */
+  max-width: calc(50% - 200px);
+}
+
+/* Legend — sits inside .bottom-left-stack as a flex item (no longer
+   absolutely positioned). The `hidden` attribute is removed by buildLegend()
+   once the country features have loaded. */
+.legend {
+  background: rgba(255,255,255,0.96); padding: 10px 12px;
+  border-radius: 4px; line-height: 1.5; font-size: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2); max-width: 220px;
+}
+.legend h4 { margin: 0 0 6px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; }
+.legend .swatch {
+  display: inline-block; width: 14px; height: 14px; margin-right: 6px;
+  vertical-align: middle; border: 1px solid rgba(0,0,0,0.3);
+}
+.legend .row { white-space: nowrap; }
+.legend .group { font-size: 10px; color: #888; text-transform: uppercase; margin-top: 4px; }
+
+/* Coordinate readout */
+.coords {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(255,255,255,0.92); padding: 4px 10px;
+  font-family: ui-monospace, "SF Mono", monospace; font-size: 11px;
+  border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  pointer-events: none; line-height: 1.3; text-align: center;
+}
+.coords #coords-mgrs {
+  color: #555; font-size: 10px; letter-spacing: 0.3px;
+  min-height: 12px;  /* reserve space so the box doesn't jump on first move */
+}
+
+/* Popup (ol.Overlay) */
+.ol-popup {
+  position: absolute;
+  background: #fff;
+  border-radius: 4px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  font-size: 12px;
+  min-width: 200px;
+  max-width: 320px;
+  pointer-events: auto;
+}
+.ol-popup h3 {
+  margin: 0 0 6px 0; font-size: 14px;
+  border-bottom: 1px solid #eee; padding-bottom: 4px;
+}
+.ol-popup .kv { display: grid; grid-template-columns: 80px 1fr; gap: 2px 8px; line-height: 1.6; }
+.ol-popup .k { color: #888; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+.ol-popup .v { color: #222; }
+.ol-popup .badge {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  background: #e8f1ff; color: #1f4e8c;
+}
+.ol-popup-close {
+  position: absolute; top: 4px; right: 8px;
+  cursor: pointer; color: #888; font-size: 16px; font-weight: bold;
+  line-height: 1;
+}
+.ol-popup-close:hover { color: #333; }
+
+/* Reset-view control button — sits below the default zoom buttons */
+.ol-reset-view { top: 80px; left: 8px; }
+.ol-reset-view button {
+  font-size: 18px; font-weight: bold;
+}
+
+/* Tweak default OL controls so they don't fight the dark map */
+.ol-zoom { top: 8px; left: 8px; }
+.ol-attribution { background: rgba(255,255,255,0.85); }
+
+/* Layers control — icon button (top-right) that toggles the panel below */
+.layers-control {
+  position: absolute; top: 12px; right: 12px; z-index: 1000;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+}
+.layers-toggle {
+  width: 32px; height: 32px; padding: 0;
+  background: rgba(255,255,255,0.96); color: #333;
+  border: 1px solid rgba(0,0,0,0.15); border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background-color 0.12s, color 0.12s;
+}
+.layers-toggle:hover { background: #f4f4f4; }
+.layers-control.open .layers-toggle {
+  background: #1f4e8c; color: #fff; border-color: #1f4e8c;
+}
+
+/* Sibling top-right dropdowns. All three anchor to the top-right; each is
+   offset inward by (button width 32px + inter-control gap 8px) per slot. */
+.layers-control--poi  { right: 52px; }
+.layers-control--info { right: 92px; }
+
+/* Data-sources panel: text-heavy, slightly wider, allows wrapping. */
+.info-panel {
+  min-width: 280px;
+  max-width: 340px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.info-panel .info-group {
+  font-size: 10px; color: #888; text-transform: uppercase;
+  letter-spacing: 0.5px; margin: 10px 0 4px;
+}
+.info-panel .info-group:first-of-type { margin-top: 4px; }
+.info-panel .info-row {
+  font-size: 11px; line-height: 1.4; margin: 3px 0;
+  color: #222;
+}
+.info-panel .info-row a { color: #1f4e8c; text-decoration: none; }
+.info-panel .info-row a:hover { text-decoration: underline; }
+.info-panel .info-row code,
+.info-panel .info-footer code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px; background: #f0f3f8; padding: 0 3px; border-radius: 2px;
+}
+.info-panel .info-footer {
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid #eee;
+  font-size: 10px; color: #777; line-height: 1.4;
+}
+/* Annotation row under a data-source line — slightly indented and de-emphasized,
+   used to explain derived columns (e.g. the hospital tier scheme). */
+.info-panel .info-row--note {
+  margin-left: 10px; font-size: 10px; color: #555; line-height: 1.45;
+}
+
+/* POI checkbox-row trimmings: a colored swatch + a soft count chip */
+.poi-swatch {
+  display: inline-block; width: 16px; height: 16px;
+  margin: 0 4px 0 2px; vertical-align: middle;
+  border-radius: 50%; text-align: center; line-height: 16px;
+  font-weight: 700; font-size: 10px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border: 1px solid rgba(0,0,0,0.2);
+}
+.poi-count {
+  color: #888; font-size: 10px; margin-left: 4px;
+}
+/* 3-band swatch used in place of the single H swatch for the hospital row
+   to communicate that hospitals carry three tier colors on the map. */
+.poi-swatch-strip {
+  padding: 0; overflow: hidden;
+  display: inline-flex; align-items: stretch;
+}
+.poi-swatch-strip > span { flex: 1; }
+
+/* Compact tier legend under the hospital toggle: three small dots + labels,
+   single line, indented under the checkbox column. */
+.poi-tier-key {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 4px 26px;   /* aligns under the row's text, past checkbox+swatch */
+  font-size: 10px; color: #555;
+  line-height: 1.5;
+}
+.poi-tier-key > span { display: inline-flex; align-items: center; gap: 4px; }
+.poi-tier-dot {
+  display: inline-block; width: 10px; height: 10px;
+  border-radius: 50%; border: 1px solid rgba(0,0,0,0.25);
+  vertical-align: middle;
+}
+.poi-source {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;
+  font-size: 9px; color: #888; line-height: 1.35;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+
+/* Weather/layers panel — hidden by default, revealed under the button */
+.weather-panel {
+  background: rgba(255,255,255,0.96); padding: 10px 12px;
+  border-radius: 4px; font-size: 12px; min-width: 220px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.weather-panel[hidden] { display: none; }
+.weather-panel h4 {
+  margin: 0 0 6px 0; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.5px; color: #555;
+}
+.weather-toggle { display: block; margin: 3px 0; cursor: pointer; user-select: none; }
+.weather-toggle input { margin-right: 6px; vertical-align: middle; }
+
+/* Inline slider used under the country-tint toggle */
+.tint-slider { display: block; width: 100%; margin: 2px 0 4px; }
+.tint-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Section divider inside the panel */
+.weather-panel hr {
+  border: none; border-top: 1px solid #eee;
+  margin: 10px -12px 8px;  /* negative margin so it spans full panel width */
+}
+.weather-panel h4 + .weather-toggle { margin-top: 0; }
+
+.anim-controls {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid #eee;
+}
+.anim-row { display: flex; align-items: center; gap: 6px; }
+.anim-btn {
+  width: 24px; height: 24px; border: 1px solid #ccc; border-radius: 3px;
+  background: #fff; cursor: pointer; font-size: 11px; padding: 0;
+  line-height: 1;
+}
+.anim-btn:hover { background: #f4f4f4; }
+#radar-slider { flex: 1; min-width: 100px; margin: 0; }
+.anim-time {
+  font-family: ui-monospace, "SF Mono", monospace; font-size: 10px;
+  color: #444; margin-top: 4px; text-align: center;
+}
+.anim-source {
+  font-size: 9px; color: #888; margin-top: 6px;
+  text-transform: uppercase; letter-spacing: 0.5px; text-align: center;
+}
+.anim-loading {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: #ff9933; margin-left: 4px; opacity: 0;
+  transition: opacity 0.15s;
+}
+.anim-loading.on { opacity: 1; }
+
+/* Range-rings tool — bottom-left widget. Sits where the OL ScaleLine used
+   to live; provides a button (with browser-native tooltip via title=),
+   plus a Clear button that appears once rings are placed and an inline
+   hint that appears the first time the tool is enabled. */
+.range-tool {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  max-width: 360px;
+}
+.range-tool-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.96); color: #333;
+  border: 1px solid rgba(0,0,0,0.15); border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  cursor: pointer;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  transition: background-color 0.12s;
+}
+.range-tool-btn:hover { background: #f4f4f4; }
+
+/* (i) info button next to the Range Rings toggle — toggles a help blurb on
+   and off (decoupled from the tool's active state). Smaller and rounder
+   than the main toggle so it reads as ancillary. */
+.range-tool-info {
+  width: 22px; height: 22px; padding: 0;
+  background: rgba(255,255,255,0.96); color: #555;
+  border: 1px solid rgba(0,0,0,0.15); border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background-color 0.12s, color 0.12s;
+}
+.range-tool-info:hover { background: #f4f4f4; }
+.range-tool-info[aria-pressed="true"] {
+  background: #1f4e8c; color: #fff; border-color: #1f4e8c;
+}
+/* The switch (toggle slider) — visual state-of-tool indicator. The whole
+   button is the click target; the switch is decorative and follows
+   aria-pressed on the button. */
+.range-switch {
+  position: relative; display: inline-block;
+  width: 26px; height: 14px;
+  background: #c4c4c4; border-radius: 999px;
+  transition: background-color 0.15s;
+  flex-shrink: 0;
+}
+.range-switch-thumb {
+  position: absolute; top: 1px; left: 1px;
+  width: 12px; height: 12px;
+  background: #fff; border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+  transition: transform 0.15s;
+}
+.range-tool-btn[aria-pressed="true"] .range-switch { background: #1f4e8c; }
+.range-tool-btn[aria-pressed="true"] .range-switch-thumb {
+  transform: translateX(12px);
+}
+.range-tool-clear {
+  font-size: 10px; padding: 4px 9px;
+  border: 1px solid rgba(0,0,0,0.15); border-radius: 4px;
+  background: rgba(255,255,255,0.96); cursor: pointer; color: #444;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+}
+.range-tool-clear:hover { background: #f4f4f4; }
+.range-tool-clear[hidden],
+.range-tool-hint[hidden] { display: none; }
+.range-tool-hint {
+  width: 100%;  /* breaks onto its own line below the buttons */
+  background: rgba(20, 30, 48, 0.92); color: #fff;
+  font-size: 10px; padding: 4px 8px; border-radius: 3px;
+  letter-spacing: 0.3px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.15);
+}

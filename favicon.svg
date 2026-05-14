@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Concentric range-rings favicon. Mirrors the in-UI Range Rings tool
+       button so the browser tab matches the map's visual vocabulary.
+       Filled navy disc + white rings gives stable contrast in light AND
+       dark browser themes, where a transparent outline-only design would
+       disappear against certain tab backgrounds. -->
+  <circle cx="16" cy="16" r="15"   fill="#1f4e8c"/>
+  <circle cx="16" cy="16" r="11.5" fill="none" stroke="#fff" stroke-width="1.8"/>
+  <circle cx="16" cy="16" r="7.5"  fill="none" stroke="#fff" stroke-width="1.6"/>
+  <circle cx="16" cy="16" r="2.5"  fill="#fff"/>
+</svg>

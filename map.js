@@ -1,0 +1,1411 @@
+// ----- Country styling -----
+// Colorblind-safe political-map palette. Foundation is Okabe-Ito (designed
+// for protanopia, deuteranopia, tritanopia): Donovia vermillion, Laurikin
+// yellow, Houdini reddish-purple, Iceland bluish-green. Three deviations
+// add hue/lightness separation Okabe-Ito alone can't provide:
+//   • Olvana — deep wine red (darker than Donovia's vermillion so the
+//     pair separates by lightness as well as hue under red-green CVD).
+//   • Greenland — pale ice-pastel blue (much lighter than Okabe-Ito sky).
+//   • Canada — deep navy (much darker than Okabe-Ito blue).
+// The Greenland↔Canada lightness gap (~60 points) makes them distinct
+// even under total achromatopsia. Faction temperature is preserved:
+// warm = OPFOR, mid = neutral/contested, cool = real-world coalition.
+const COUNTRY_STYLE = {
+  'Olvana':    { stroke: '#4A1010', fill: '#8B2424', group: 'OPFOR (composite)' },
+  'Donovia':   { stroke: '#7A3500', fill: '#D55E00', group: 'OPFOR (composite)' },
+  'Laurikin':  { stroke: '#8C8222', fill: '#F0E442', group: 'Neutral / Contested' },
+  'Houdini':   { stroke: '#7A4566', fill: '#CC79A7', group: 'Neutral / Contested' },
+  'Iceland':   { stroke: '#005C44', fill: '#009E73', group: 'Real-world' },
+  'Greenland': { stroke: '#4A7B95', fill: '#A6D8F2', group: 'Real-world' },
+  'Canada':    { stroke: '#001A2C', fill: '#003F5C', group: 'Real-world' },
+};
+const DEFAULT_STYLE = { stroke: '#555', fill: '#bbb', group: 'Other' };
+
+function hexAlpha(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ----- Projection: EPSG:3978 (NAD83 / Canada Atlas Lambert) -----
+// Lambert Conformal Conic, central meridian -95°W, standard parallels
+// 49°N / 77°N. Conformal — preserves shape locally — and minimizes
+// scale distortion across all of Canada and the surrounding North
+// Atlantic and Arctic.
+proj4.defs(
+  'EPSG:3978',
+  '+proj=lcc +lat_1=49 +lat_2=77 +lat_0=49 +lon_0=-95 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs'
+);
+ol.proj.proj4.register(proj4);
+const proj3978 = ol.proj.get('EPSG:3978');
+proj3978.setExtent([-4926564, -5396819, 5347436, 4623181]);
+
+// ----- Polygon style (fill only) -----
+// Strokes are NOT in the style — they're drawn in a postrender hook below
+// (see "Split-color borders") so each country only paints its own interior
+// half of the stroke, exposing the neighbor's color on the other side.
+// When a basemap is active, the fill is dropped so masked terrain shows
+// — unless the "country tint" toggle is on, in which case a 40% wash of
+// the country color is painted over the basemap (hybrid political/topo).
+let basemapActive    = false;
+let countryTintActive = false;
+let countryTintAlpha = 0.40;  // user-adjustable via slider; range 0..1
+let rangeToolActive  = false;
+function countryStyle(feature, hover = false) {
+  const name = feature.get('NAME');
+  const s = COUNTRY_STYLE[name] || DEFAULT_STYLE;
+  let fillColor;
+  if (basemapActive) {
+    fillColor = countryTintActive ? hexAlpha(s.fill, countryTintAlpha) : 'rgba(0,0,0,0)';
+  } else if (hover) {
+    fillColor = hexAlpha(s.fill, 1.0);
+  } else {
+    fillColor = hexAlpha(s.fill, 0.92);
+  }
+  return new ol.style.Style({
+    fill: new ol.style.Fill({ color: fillColor }),
+  });
+}
+
+// ----- Country polygon source + layer -----
+const countriesSource = new ol.source.Vector({
+  url: 'data/scenario.geojson',
+  format: new ol.format.GeoJSON({
+    dataProjection: 'EPSG:4326',
+    featureProjection: 'EPSG:3978',
+  }),
+});
+const countriesLayer = new ol.layer.Vector({
+  source: countriesSource,
+  style: countryStyle,
+  zIndex: 10,   // above basemap tiles (5), below weather (40+) and labels (100)
+});
+
+// ----- Label layer (one Point per unique country NAME) -----
+const labelsSource = new ol.source.Vector();
+const labelsLayer = new ol.layer.Vector({
+  source: labelsSource,
+  style: feature => new ol.style.Style({
+    text: new ol.style.Text({
+      text: feature.get('label'),
+      font: '700 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fill: new ol.style.Fill({ color: '#fff' }),
+      stroke: new ol.style.Stroke({ color: '#000', width: 3 }),
+      textAlign: 'center',
+    }),
+  }),
+  // Labels render on top of polygons
+  zIndex: 100,
+});
+
+// ----- Map -----
+// No ScaleLine: the range-rings tool (bottom-left) is the primary
+// distance reference instead. Each ring is labeled with its true ground
+// distance (250 / 500 / 750 / 1000 km), which is unambiguous regardless
+// of viewport latitude — a scale bar would only have duplicated/conflicted
+// with the rings' own per-radius labels.
+const map = new ol.Map({
+  target: 'map',
+  layers: [countriesLayer, labelsLayer],
+  view: new ol.View({
+    projection: 'EPSG:3978',
+    center: [0, 0],
+    zoom: 1,
+  }),
+  controls: ol.control.defaults.defaults({
+    attributionOptions: { collapsible: true },
+  }),
+});
+
+// ----- Build labels + fit view once polygons load -----
+countriesSource.once('featuresloadend', () => {
+  // Drop the inline Ocean polygon — the dark map background is the "ocean"
+  const all = countriesSource.getFeatures();
+  const oceanFeatures = all.filter(f => f.get('TYPE') === 'Ocean');
+  for (const f of oceanFeatures) countriesSource.removeFeature(f);
+  const countryFeatures = all.filter(f => f.get('TYPE') !== 'Ocean');
+
+  // Cache each feature's polygon coordinate structure once. The postrender
+  // hook walks these every frame; calling getCoordinates() each time would
+  // re-allocate the nested [[x,y],...] array (64k entries for Canada alone)
+  // on every render — a major contributor to tile-load choppiness.
+  for (const f of countryFeatures) {
+    const geom = f.getGeometry();
+    if (!geom) continue;
+    f.set('_polys', geom instanceof ol.geom.MultiPolygon
+      ? geom.getCoordinates()
+      : [geom.getCoordinates()]);
+  }
+
+  // Pick the largest sub-polygon per unique NAME (largest by extent area
+  // in projected meters)
+  function extentArea(extent) {
+    return (extent[2] - extent[0]) * (extent[3] - extent[1]);
+  }
+  function largestPolygon(geom) {
+    if (geom.getType() === 'Polygon') return geom;
+    const polys = geom.getPolygons();
+    let best = polys[0], bestA = extentArea(best.getExtent());
+    for (let i = 1; i < polys.length; i++) {
+      const a = extentArea(polys[i].getExtent());
+      if (a > bestA) { bestA = a; best = polys[i]; }
+    }
+    return best;
+  }
+
+  const byName = new Map();
+  for (const f of countryFeatures) {
+    const poly = largestPolygon(f.getGeometry());
+    const a = extentArea(poly.getExtent());
+    const name = f.get('NAME');
+    const prev = byName.get(name);
+    if (!prev || a > prev.area) {
+      byName.set(name, {
+        poly, area: a, label: f.get('LABEL_TXT') || f.get('NAME'),
+      });
+    }
+  }
+
+  // Compute area-weighted centroid (shoelace) of each polygon's outer
+  // ring in projected EPSG:3978 meters, and add a Point feature there.
+  for (const { poly, label } of byName.values()) {
+    const ring = poly.getLinearRing(0).getCoordinates();
+    let a = 0, cx = 0, cy = 0;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [x0, y0] = ring[i], [x1, y1] = ring[i + 1];
+      const cross = x0 * y1 - x1 * y0;
+      a  += cross;
+      cx += (x0 + x1) * cross;
+      cy += (y0 + y1) * cross;
+    }
+    a *= 0.5;
+    labelsSource.addFeature(new ol.Feature({
+      geometry: new ol.geom.Point([cx / (6 * a), cy / (6 * a)]),
+      label,
+    }));
+  }
+
+  // Constrain panning: viewport can't extend more than 2000 km past
+  // the country bounding box. EPSG:3978 units are meters, so buffer = 2e6.
+  // smoothExtentConstraint stays at its default (true) so the edge feels
+  // like a soft wall rather than a hard stop.
+  const ext = countriesSource.getExtent();
+  const PAN_BUFFER_M = 2_000_000;
+  const bufferedExt = [
+    ext[0] - PAN_BUFFER_M, ext[1] - PAN_BUFFER_M,
+    ext[2] + PAN_BUFFER_M, ext[3] + PAN_BUFFER_M,
+  ];
+  map.setView(new ol.View({
+    projection: 'EPSG:3978',
+    extent: bufferedExt,
+    showFullExtent: true,  // allow zoom levels that show the whole extent
+  }));
+  map.getView().fit(ext, { padding: [40, 40, 40, 40] });
+  buildLegend(countryFeatures);
+});
+
+// ----- Cursor coordinate readout: lat/lon (with N/S/E/W) + MGRS -----
+const coordsLatLon = document.getElementById('coords-latlon');
+const coordsMgrs   = document.getElementById('coords-mgrs');
+
+function fmtLatLon(lat, lon) {
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(4)}° ${ns}, ${Math.abs(lon).toFixed(4)}° ${ew}`;
+}
+function fmtMgrs(lat, lon) {
+  try {
+    // 5 = 1m precision; output is e.g. "16TFN1234567890"
+    const raw = mgrs.forward([lon, lat], 5);
+    // Standard NATO readable form: "<zone><band> <square> <easting> <northing>"
+    const m = raw.match(/^(\d{1,2}[A-Z])([A-Z]{2})(\d{5})(\d{5})$/);
+    return m ? `${m[1]} ${m[2]} ${m[3]} ${m[4]}` : raw;
+  } catch (e) {
+    return '—';  // mgrs.forward throws near the poles / outside its valid range
+  }
+}
+
+map.on('pointermove', (evt) => {
+  if (evt.dragging) return;
+  const [lon, lat] = ol.proj.toLonLat(evt.coordinate, 'EPSG:3978');
+  coordsLatLon.textContent = fmtLatLon(lat, lon);
+  coordsMgrs.textContent   = fmtMgrs(lat, lon);
+});
+map.getViewport().addEventListener('mouseleave', () => {
+  coordsLatLon.textContent = 'Move cursor for coordinates';
+  coordsMgrs.textContent   = '';
+});
+
+// ----- Hover highlight (throttled to one hit-test per animation frame) -----
+// pointermove fires on every pixel of mouse motion; hit-testing 121k vertices
+// across 7 MultiPolygons that often is enough to cause visible jank. rAF
+// coalesces rapid events into one pass per frame (~60Hz), and the basemap
+// short-circuit skips style flips that wouldn't change anything visible.
+let hoverFeature = null;
+let pendingHoverEvt = null;
+let hoverRafId = 0;
+map.on('pointermove', (evt) => {
+  if (evt.dragging) return;
+  pendingHoverEvt = evt;
+  if (hoverRafId) return;
+  hoverRafId = requestAnimationFrame(() => {
+    hoverRafId = 0;
+    const e = pendingHoverEvt;
+    pendingHoverEvt = null;
+    if (!e) return;
+    const f = map.forEachFeatureAtPixel(e.pixel, (fr, layer) =>
+      layer === countriesLayer ? fr : null
+    );
+    if (f !== hoverFeature) {
+      // In basemap mode the country fill is fixed (transparent or 40% tint),
+      // so toggling hover style triggers a re-render with no visible change.
+      if (!basemapActive) {
+        if (hoverFeature) hoverFeature.setStyle(undefined);
+        if (f) f.setStyle(countryStyle(f, true));
+      }
+      hoverFeature = f;
+    }
+    // Range tool owns the cursor while active — don't let hover override it.
+    if (!rangeToolActive) {
+      map.getTargetElement().style.cursor = f ? 'pointer' : '';
+    }
+  });
+});
+
+// ----- Click popup -----
+const popupEl     = document.getElementById('popup');
+const popupBody   = document.getElementById('popup-content');
+const popupClose  = document.getElementById('popup-close');
+const popupOverlay = new ol.Overlay({
+  element: popupEl,
+  positioning: 'bottom-center',
+  // Small standoff so the popup body doesn't sit exactly on the cursor.
+  offset: [0, -8],
+  stopEvent: true,
+  autoPan: { animation: { duration: 250 }, margin: 40 },
+});
+map.addOverlay(popupOverlay);
+popupClose.addEventListener('click', () => { popupEl.style.display = 'none'; });
+
+function fmtArea(m2) {
+  if (!m2 || m2 <= 0) return '—';
+  return (m2 / 1e6).toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' km²';
+}
+
+map.on('click', (evt) => {
+  // Range-rings tool takes precedence: a click places concentric rings at
+  // the cursor and skips the country popup.
+  if (rangeToolActive) {
+    placeRangeRings(evt.coordinate);
+    popupEl.style.display = 'none';
+    return;
+  }
+  const f = map.forEachFeatureAtPixel(evt.pixel, (fr, layer) =>
+    layer === countriesLayer ? fr : null
+  );
+  if (!f) { popupEl.style.display = 'none'; return; }
+
+  const p = f.getProperties();
+  const name  = p.LABEL_TXT || p.NAME || '(unnamed)';
+  const type  = p.TYPE || '—';
+  const group = (COUNTRY_STYLE[p.NAME] || DEFAULT_STYLE).group;
+  popupBody.innerHTML = `
+    <h3>${name}</h3>
+    <div class="kv">
+      <span class="k">Type</span><span class="v"><span class="badge">${type}</span></span>
+      <span class="k">Name</span><span class="v">${p.NAME ?? '—'}</span>
+      <span class="k">Label</span><span class="v">${p.LABEL_TXT ?? '<em>(none)</em>'}</span>
+      <span class="k">Group</span><span class="v">${group}</span>
+      <span class="k">Area</span><span class="v">${fmtArea(p.Shape_Area)}</span>
+    </div>`;
+  popupEl.style.display = '';
+  popupOverlay.setPosition(evt.coordinate);
+});
+
+// ----- Reset-view control (custom) -----
+class ResetControl extends ol.control.Control {
+  constructor() {
+    const button = document.createElement('button');
+    button.innerHTML = '⌖';
+    button.title = 'Reset view to scenario extent';
+    const div = document.createElement('div');
+    div.className = 'ol-reset-view ol-unselectable ol-control';
+    div.appendChild(button);
+    super({ element: div });
+    button.addEventListener('click', () => {
+      const ext = countriesSource.getExtent();
+      if (ext && isFinite(ext[0])) {
+        map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 300 });
+      }
+    });
+  }
+}
+map.addControl(new ResetControl());
+
+// ----- Legend (grouped by faction) -----
+function buildLegend(features) {
+  const seen = new Set();
+  const groups = {};
+  for (const f of features) {
+    const name = f.get('NAME');
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const s = COUNTRY_STYLE[name] || DEFAULT_STYLE;
+    (groups[s.group] = groups[s.group] || []).push({ name, fill: s.fill });
+  }
+  let html = '<h4>Faction Map</h4>';
+  for (const [grp, items] of Object.entries(groups)) {
+    html += `<div class="group">${grp}</div>`;
+    for (const it of items) {
+      html += `<div class="row"><span class="swatch" style="background:${it.fill}"></span>${it.name}</div>`;
+    }
+  }
+  html += `<div class="group">Hydrography</div>`;
+  html += `<div class="row"><span class="swatch" style="background:#1a2332"></span>Open Water</div>`;
+
+  // Populate the pre-existing #legend slot inside .bottom-left-stack rather
+  // than creating a floating element — the stack handles the layout (legend
+  // on top of the range-rings widget) and the upward push when the widget
+  // expands.
+  const legend = document.getElementById('legend');
+  legend.innerHTML = html;
+  legend.removeAttribute('hidden');
+}
+
+// ----- Error surface for failed data load -----
+countriesSource.on('featuresloaderror', () => {
+  document.querySelector('.title-bar').innerHTML +=
+    '<br><span style="color:#ff6b6b;font-size:11px">Failed to load data — serve this folder over HTTP (see file header).</span>';
+});
+
+// =============================================================
+// Weather overlays — Environment Canada GeoMet (WMS, EPSG:3978)
+// =============================================================
+const GEOMET_URL = 'https://geo.weather.gc.ca/geomet';
+
+// GeoMet WMS time dimension wants strict ISO8601 to seconds (no millis).
+function isoSec(d) { return d.toISOString().replace(/\.\d+Z$/, 'Z'); }
+
+const FRAME_DURATION_MS = 500;   // 2 fps
+const $ = (id) => document.getElementById(id);
+
+// ----- Master animation controller -----
+// One timeline drives all enabled weather layers. The master cadence is
+// the smallest cadence among layers (radar = 6 min). Each layer rounds
+// the master timestamp to its OWN cadence — so radar updates every step,
+// cloud cover updates only every 10 steps (60 / 6). Both end up showing
+// the same effective moment in wall-clock time.
+const BASE_CADENCE_MIN  = 6;
+const MASTER_FRAMES     = 30;   // 3 hours of history at 6-min steps
+const MASTER_LATENCY_MIN = 10;
+
+const animatedLayers = []; // [{ layer, source, cadenceMs, lastTime, panelId }]
+let masterFrame = MASTER_FRAMES - 1;
+let masterTimer = null;
+let masterPlaying = false;
+let baseLatestMs = 0;
+
+function refreshBaseLatest() {
+  const cMs = BASE_CADENCE_MIN * 60_000;
+  baseLatestMs = Math.floor((Date.now() - MASTER_LATENCY_MIN * 60_000) / cMs) * cMs;
+}
+refreshBaseLatest();
+setInterval(refreshBaseLatest, 5 * 60_000);
+
+function masterTimeAt(idx) {
+  return new Date(baseLatestMs - (MASTER_FRAMES - 1 - idx) * BASE_CADENCE_MIN * 60_000);
+}
+function fmtMasterTime(d, idx) {
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  const minsBack = (MASTER_FRAMES - 1 - idx) * BASE_CADENCE_MIN;
+  const ago = minsBack === 0 ? 'now' : `−${minsBack}m`;
+  return `${hh}:${mm}Z (${ago})`;
+}
+function applyMasterFrame() {
+  const t = masterTimeAt(masterFrame);
+  // For each visible layer, round t to that layer's cadence and update
+  // the WMS TIME param only if it actually changed (prevents redundant fetches).
+  for (const al of animatedLayers) {
+    if (!al.layer.getVisible()) continue;
+    const rounded = Math.floor(t.getTime() / al.cadenceMs) * al.cadenceMs;
+    const iso = isoSec(new Date(rounded));
+    if (iso !== al.lastTime) {
+      al.source.updateParams({ TIME: iso });
+      al.lastTime = iso;
+    }
+  }
+  $('master-time').textContent = fmtMasterTime(t, masterFrame);
+  $('master-slider').value = masterFrame;
+}
+function setMasterFrame(idx) { masterFrame = idx; applyMasterFrame(); }
+function startMaster() {
+  if (masterTimer) return;
+  masterTimer = setInterval(() => setMasterFrame((masterFrame + 1) % MASTER_FRAMES), FRAME_DURATION_MS);
+  masterPlaying = true;
+  $('master-play').textContent = '⏸';
+}
+function stopMaster() {
+  if (masterTimer) clearInterval(masterTimer);
+  masterTimer = null;
+  masterPlaying = false;
+  $('master-play').textContent = '▶';
+}
+function anyLayerVisible() { return animatedLayers.some(al => al.layer.getVisible()); }
+
+// Wire master controls
+$('master-play').addEventListener('click', () => { if (masterPlaying) stopMaster(); else startMaster(); });
+$('master-slider').addEventListener('input', (e) => {
+  stopMaster();
+  setMasterFrame(parseInt(e.target.value, 10));
+});
+
+// ----- Layer setup: registers a layer + toggle handler. No per-layer animation. -----
+// crossOrigin is intentionally omitted — we don't need pixel access.
+function setupAnimatedWmsLayer({ panelId, layerName, cadenceMin, opacity, zIndex }) {
+  const cadenceMs = cadenceMin * 60_000;
+  const source = new ol.source.TileWMS({
+    url: GEOMET_URL,
+    params: { LAYERS: layerName, FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.3.0' },
+  });
+  const layer = new ol.layer.Tile({ visible: false, opacity, source, zIndex });
+  map.addLayer(layer);
+
+  const al = { layer, source, cadenceMs, lastTime: null, panelId };
+  animatedLayers.push(al);
+
+  // Tile event hooks: loading indicator + error reporting
+  let pending = 0, loaded = 0, errors = 0;
+  source.on('tileloadstart', (e) => {
+    pending++;
+    $(panelId + '-loading').classList.add('on');
+    if (loaded + errors === 0) {
+      console.log(`[${panelId}] first tile URL:`, e.tile.src_ || e.tile.getImage().src);
+    }
+  });
+  source.on('tileloadend', () => {
+    loaded++;
+    pending = Math.max(0, pending - 1);
+    if (pending === 0) $(panelId + '-loading').classList.remove('on');
+  });
+  source.on('tileloaderror', (e) => {
+    errors++;
+    pending = Math.max(0, pending - 1);
+    if (pending === 0) $(panelId + '-loading').classList.remove('on');
+    console.warn(`[${panelId}] tile failed:`, e.tile.src_ || e.tile.getImage().src);
+  });
+
+  // Toggle: on first enable, show master controls + start anim if not running
+  $('toggle-' + panelId).addEventListener('change', (e) => {
+    if (e.target.checked) {
+      layer.setVisible(true);
+      al.lastTime = null;  // force update on the next applyMasterFrame
+      $('master-controls').style.display = '';
+      applyMasterFrame();
+      if (!masterPlaying) startMaster();
+    } else {
+      layer.setVisible(false);
+      $(panelId + '-loading').classList.remove('on');
+      if (!anyLayerVisible()) {
+        stopMaster();
+        $('master-controls').style.display = 'none';
+      }
+    }
+  });
+}
+
+// Radar — Rain Rate Reflectivity, 1km grid, 6-min cadence
+setupAnimatedWmsLayer({
+  panelId:    'radar',
+  layerName:  'RADAR_1KM_RRAI',
+  cadenceMin: 6,
+  opacity:    0.75,
+  zIndex:     50,    // above country fills (default 0), below labels (100)
+});
+
+// GDPS total cloud cover — global NWP, 15km grid, hourly cadence.
+// Renders only clouds (transparent over clear sky), no surface terrain.
+setupAnimatedWmsLayer({
+  panelId:    'cloud',
+  layerName:  'GDPS_15km_TotalCloudCover',
+  cadenceMin: 60,
+  opacity:    0.7,
+  zIndex:     40,    // below radar so radar wins compositing when both on
+});
+
+// =============================================================
+// Basemaps — terrain/imagery tiles clipped to country polygons
+// =============================================================
+// The country polygons act as a mask: tiles render on the layer's canvas,
+// then on `postrender` we composite the country shapes with
+// globalCompositeOperation='destination-in'. That keeps only the pixels that
+// fall inside the polygons; everything else is erased, leaving the dark
+// "open water" backdrop visible. The country fill is dropped (see
+// countryStyle above) so the masked terrain shows through; only the
+// colored stroke remains for faction identification.
+
+// NRCan tile pyramid (EPSG:3978-native services share this grid)
+const NRCAN_RESOLUTIONS = [
+  38364.660062653464, 22489.62831258996,  13229.193125052918,
+  7937.5158750317505, 4630.2175937685215, 2645.8386250105837,
+  1587.5031750063501, 926.0435187537042,  529.1677250021168,
+  317.50063500127004, 185.20870375074085, 111.12522225044451,
+  66.1459656252646,   38.36466006265346,  22.48962831258996,
+  13.229193125052918, 7.9375158750317505, 4.6302175937685215,
+  2.6458386250105836, 1.5875031750063502,
+];
+const nrcanTileGrid = new ol.tilegrid.TileGrid({
+  origin: [-34655800, 39310000],
+  resolutions: NRCAN_RESOLUTIONS,
+  tileSize: [256, 256],
+});
+const NRCAN_BASE = 'https://maps-cartes.services.geo.ca/server2_serveur2/rest/services/BaseMaps';
+
+// Build a Path2D in device-pixel coordinates from a feature's cached
+// polygon rings. `coordinateToPixelTransform` returns CSS pixels, so we
+// multiply by frameState.pixelRatio for the device canvas. Returning a
+// Path2D lets the caller reuse the same path for clip + stroke without
+// re-walking the (potentially 64k-vertex) coordinate array.
+function buildFeaturePath2D(feature, frameState) {
+  const polys = feature.get('_polys');
+  if (!polys) return null;
+  const tx = frameState.coordinateToPixelTransform;
+  const pr = frameState.pixelRatio;
+  const path = new Path2D();
+  for (const poly of polys) {
+    for (const ring of poly) {
+      const len = ring.length;
+      if (len === 0) continue;
+      const r0 = ring[0];
+      path.moveTo((tx[0] * r0[0] + tx[2] * r0[1] + tx[4]) * pr,
+                  (tx[1] * r0[0] + tx[3] * r0[1] + tx[5]) * pr);
+      for (let i = 1; i < len; i++) {
+        const ri = ring[i];
+        path.lineTo((tx[0] * ri[0] + tx[2] * ri[1] + tx[4]) * pr,
+                    (tx[1] * ri[0] + tx[3] * ri[1] + tx[5]) * pr);
+      }
+      path.closePath();
+    }
+  }
+  return path;
+}
+
+// Combined Path2D used as the basemap clip mask (union of all countries).
+function buildAllCountriesPath2D(frameState) {
+  const combined = new Path2D();
+  for (const feature of countriesSource.getFeatures()) {
+    const p = buildFeaturePath2D(feature, frameState);
+    if (p) combined.addPath(p);
+  }
+  return combined;
+}
+
+// ---- View-keyed caches ----
+// Both the basemap clip path and the country border art are functions of
+// (view state, feature set, basemap mode) only — not of which tile just
+// loaded or which country is being hovered. Caching them and invalidating
+// on view change means tile-load frames just blit a bitmap / reuse a
+// Path2D, instead of re-walking ~121k vertices every time. This is what
+// kept the page choppy after the JS hot-path optimizations: the postrender
+// hook ran on every tile load and traversed full geometry each time.
+let _clipPath = null;
+let _clipPathKey = '';
+function getCachedClipPath2D(fs) {
+  const vs = fs.viewState;
+  const key = `${vs.resolution}|${vs.center[0]}|${vs.center[1]}|${vs.rotation}|${fs.pixelRatio}`;
+  if (key !== _clipPathKey) {
+    _clipPath = buildAllCountriesPath2D(fs);
+    _clipPathKey = key;
+  }
+  return _clipPath;
+}
+
+let _bordersCanvas = null;
+let _bordersCtx = null;
+let _bordersKey = '';
+function invalidateRenderCaches() {
+  _clipPathKey = '';
+  _bordersKey  = '';
+}
+countriesSource.on('change', invalidateRenderCaches);
+
+// ----- Split-color borders -----
+// Every country strokes its own boundary clipped to its interior, so each
+// neighbor only contributes the inner half of the stroke — at shared borders
+// you see both colors meeting at the line.
+//
+// Two visual modes:
+//   • No basemap: thin clean split-color outline (BORDER_PLAIN px / side).
+//   • Basemap on: NatGeo-style fading band — built by stacking BAND_STEPS
+//     concentric strokes from widest+narrowest (each at the same low alpha).
+//     Strokes overlap most near the boundary and least at BAND_MAX_WIDTH
+//     inward, producing a smooth falloff from opaque at the border to
+//     transparent at the inward edge.
+const BORDER_PLAIN     = 1.4;   // CSS px per side, no-basemap mode
+const BAND_MAX_WIDTH   = 10;    // CSS px per side, widest stroke (extent of fade)
+const BAND_MIN_WIDTH   = 0.5;   // CSS px per side, narrowest stroke (sharp edge)
+const BAND_STEPS       = 6;     // layered strokes per country (was 10; visually
+                                // identical at this width range, 40% less work)
+const BAND_STEP_ALPHA  = 0.10;  // per-stroke opacity, retuned for 6 steps so the
+                                // cumulative band opacity stays ≈ original
+
+// Paint the split-color border art into any context. Pure function of
+// (frameState, basemapActive); used both for the offscreen bitmap cache
+// and as a fallback if caching is disabled.
+function paintBordersInto(ctx, fs) {
+  const pr = fs.pixelRatio;
+  const features = countriesSource.getFeatures();
+  if (basemapActive) {
+    // NatGeo-style fading band per country (split colors at shared borders)
+    for (const feature of features) {
+      const path = buildFeaturePath2D(feature, fs);
+      if (!path) continue;
+      const s = COUNTRY_STYLE[feature.get('NAME')] || DEFAULT_STYLE;
+      const bandColor = hexAlpha(s.fill, BAND_STEP_ALPHA);
+      ctx.save();
+      ctx.clip(path);
+      // Round joins/caps prevent miter spikes at sharp interior vertices —
+      // critical because BAND_MAX_WIDTH × 2 strokes can produce 10×-width
+      // miter extensions that show up as radial spikes after clipping.
+      ctx.lineJoin = 'round';
+      ctx.lineCap  = 'round';
+      ctx.strokeStyle = bandColor;
+      // Layer strokes from widest (most-transparent fringe) to narrowest
+      // (sharp edge at boundary). Same Path2D reused — no re-walking of
+      // the geometry array between strokes.
+      for (let i = 0; i < BAND_STEPS; i++) {
+        const t = i / (BAND_STEPS - 1);          // 0 = widest, 1 = narrowest
+        const widthCss = BAND_MAX_WIDTH - (BAND_MAX_WIDTH - BAND_MIN_WIDTH) * t;
+        ctx.lineWidth = widthCss * 2 * pr;       // half clipped → widthCss visible
+        ctx.stroke(path);
+      }
+      ctx.restore();
+    }
+  } else {
+    // Plain mode: simple split-color outline
+    for (const feature of features) {
+      const path = buildFeaturePath2D(feature, fs);
+      if (!path) continue;
+      const s = COUNTRY_STYLE[feature.get('NAME')] || DEFAULT_STYLE;
+      ctx.save();
+      ctx.clip(path);
+      ctx.lineJoin = 'round';
+      ctx.lineCap  = 'round';
+      ctx.strokeStyle = s.stroke;
+      ctx.lineWidth   = BORDER_PLAIN * 2 * pr;
+      ctx.stroke(path);
+      ctx.restore();
+    }
+  }
+}
+
+countriesLayer.on('postrender', (event) => {
+  const ctx = event.context;
+  const fs  = event.frameState;
+  const w   = ctx.canvas.width;
+  const h   = ctx.canvas.height;
+  const vs  = fs.viewState;
+
+  // Cache key: re-paint only when something we'd visibly draw differently
+  // changes. Tile loads and hover restyles fire postrender repeatedly with
+  // the same view state — those frames just blit the cached bitmap.
+  const key = `${w}|${h}|${vs.resolution}|${vs.center[0]}|${vs.center[1]}|${vs.rotation}|${fs.pixelRatio}|${basemapActive ? 1 : 0}`;
+
+  if (key !== _bordersKey) {
+    if (!_bordersCanvas) {
+      _bordersCanvas = document.createElement('canvas');
+      _bordersCtx = _bordersCanvas.getContext('2d');
+    }
+    if (_bordersCanvas.width  !== w) _bordersCanvas.width  = w;
+    if (_bordersCanvas.height !== h) _bordersCanvas.height = h;
+    _bordersCtx.clearRect(0, 0, w, h);
+    paintBordersInto(_bordersCtx, fs);
+    _bordersKey = key;
+  }
+  ctx.drawImage(_bordersCanvas, 0, 0);
+});
+
+function makeBasemap(opts) {
+  const source = new ol.source.XYZ({
+    url: opts.url,
+    projection: opts.projection,
+    tileGrid: opts.tileGrid,        // undefined → OL infers (EPSG:3857 default)
+    attributions: opts.attribution,
+    crossOrigin: 'anonymous',
+  });
+  const layer = new ol.layer.Tile({
+    visible: false,
+    source,
+    zIndex: 5,
+  });
+
+  // Diagnostic: log tile activity so we can see if requests are happening
+  let loaded = 0, errors = 0;
+  source.on('tileloadstart', (e) => {
+    if (loaded + errors === 0) {
+      console.log(`[basemap:${opts.label}] first tile URL:`, e.tile.src_ || e.tile.getImage().src);
+    }
+  });
+  source.on('tileloadend',   () => { loaded++; });
+  source.on('tileloaderror', (e) => {
+    errors++;
+    console.warn(`[basemap:${opts.label}] tile failed:`, e.tile.src_ || e.tile.getImage().src);
+  });
+
+  // Clip the tile to country polygons via a cached Path2D mask. The path
+  // is rebuilt only when view state changes; tile loads reuse the cache.
+  layer.on('prerender', (event) => {
+    event.context.save();
+    event.context.clip(getCachedClipPath2D(event.frameState));
+  });
+  layer.on('postrender', (event) => {
+    event.context.restore();
+  });
+
+  map.addLayer(layer);
+  return layer;
+}
+
+const basemapLayers = {
+  hillshade: makeBasemap({
+    label: 'hillshade',
+    // Esri World Hillshade — global coverage. NRCan's hillshade only covers
+    // Canadian territory, leaving Alaska/Donovia, Greenland, Iceland blank.
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
+    projection: 'EPSG:3857',  // reprojected on the fly
+    attribution: 'Hillshade &copy; Esri, USGS, NOAA',
+  }),
+  transport: makeBasemap({
+    label: 'transport',
+    // OpenStreetMap — global street/transit basemap. Replaces NRCan CBMT
+    // (Canada-only) so countries outside Canada show roads & place names too.
+    url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    projection: 'EPSG:3857',
+    attribution: '&copy; OpenStreetMap contributors',
+  }),
+  satellite: makeBasemap({
+    label: 'satellite',
+    // EPSG:3857 source — OL reprojects on the fly into our EPSG:3978 view
+    url: 'https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    projection: 'EPSG:3857',
+    attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
+  }),
+  topo: makeBasemap({
+    label: 'topo',
+    url: 'https://{a-c}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    projection: 'EPSG:3857',
+    attribution: '&copy; OpenTopoMap (CC-BY-SA), &copy; OpenStreetMap',
+  }),
+};
+
+// Radio handler — only one basemap visible at a time
+document.querySelectorAll('input[name="basemap"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    if (!e.target.checked) return;
+    const value = e.target.value;
+    for (const lyr of Object.values(basemapLayers)) lyr.setVisible(false);
+    if (value === 'none') {
+      basemapActive = false;
+    } else {
+      basemapLayers[value].setVisible(true);
+      basemapActive = true;
+    }
+    // Force the country layer to re-evaluate styles (fill on/off)
+    countriesLayer.changed();
+  });
+});
+
+// Country-tint toggle + opacity slider — when toggle is on AND a basemap
+// is active, country interiors get a color wash over the basemap (hybrid
+// political/topo look). Slider drives the wash opacity live; it's disabled
+// when the toggle is off so its UI state matches its effective state.
+const tintToggleEl = document.getElementById('toggle-country-tint');
+const tintSliderEl = document.getElementById('country-tint-slider');
+const tintValueEl  = document.getElementById('country-tint-value');
+// We dirty the source (not just the layer) because OL caches per-feature
+// styled geometry on the vector layer; layer.changed() alone won't force
+// re-evaluation of countryStyle() when only its closure values change.
+tintToggleEl.addEventListener('change', (e) => {
+  countryTintActive = e.target.checked;
+  tintSliderEl.disabled = !countryTintActive;
+  countriesSource.changed();
+});
+tintSliderEl.addEventListener('input', (e) => {
+  const pct = Number(e.target.value);
+  countryTintAlpha = pct / 100;
+  tintValueEl.textContent = String(pct);
+  if (countryTintActive) countriesSource.changed();
+});
+
+// =============================================================
+// Range rings overlay — toggleable click-to-place
+// =============================================================
+// Concentric rings at 250 / 500 / 750 / 1000 km from the click point,
+// each labeled with its radius. Rings are GEODESIC: every vertex is the
+// click point offset by the target distance along a great circle, then
+// projected into EPSG:3978. This matches OL's ScaleLine (also geodesic),
+// so the 250 km ring aligns with the scale bar at 250 km. In LCC the
+// projected outline appears slightly egg-shaped at high latitudes —
+// that is correct, because a true geodesic circle on the ellipsoid
+// projects non-circularly outside the standard parallels.
+const RANGE_RADII_M = [250_000, 500_000, 750_000, 1_000_000];
+const RANGE_RING_STEPS = 256;  // vertices per ring; 256 is visually smooth
+
+const rangeSource = new ol.source.Vector();
+const rangeLayer = new ol.layer.Vector({
+  source: rangeSource,
+  zIndex: 90,  // above weather (40-50), below country labels (100)
+  style: (feature) => {
+    const t = feature.get('rangeType');
+    if (t === 'center') {
+      return new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 4,
+          fill:   new ol.style.Fill({ color: '#ff3b30' }),
+          stroke: new ol.style.Stroke({ color: '#5a0000', width: 1 }),
+        }),
+      });
+    }
+    if (t === 'ring') {
+      return new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: 'rgba(255,255,255,0.85)', width: 1 }),
+        fill:   new ol.style.Fill({ color: 'rgba(255,255,255,0.05)' }),
+      });
+    }
+    if (t === 'label') {
+      return new ol.style.Style({
+        text: new ol.style.Text({
+          text: feature.get('text'),
+          font: '600 10px ui-monospace, "SF Mono", Menlo, monospace',
+          fill: new ol.style.Fill({ color: '#fff' }),
+          stroke: new ol.style.Stroke({ color: '#000', width: 2.5 }),
+          textAlign: 'center',
+          offsetY: 0,
+        }),
+      });
+    }
+    return null;
+  },
+});
+map.addLayer(rangeLayer);
+
+function clearRangeRings() {
+  rangeSource.clear();
+}
+
+function placeRangeRings(coord) {
+  rangeSource.clear();
+  // Center dot
+  const center = new ol.Feature({ geometry: new ol.geom.Point(coord) });
+  center.set('rangeType', 'center');
+  rangeSource.addFeature(center);
+
+  // Compute click point in lon/lat for geodesic offsets along the sphere.
+  const centerLL = ol.proj.toLonLat(coord, 'EPSG:3978');
+
+  for (const r of RANGE_RADII_M) {
+    // Build the ring by walking 0..2π in bearing, offsetting r meters
+    // along a great circle, and projecting each vertex back to EPSG:3978.
+    const ringCoords = new Array(RANGE_RING_STEPS + 1);
+    for (let i = 0; i <= RANGE_RING_STEPS; i++) {
+      const bearing = (i / RANGE_RING_STEPS) * 2 * Math.PI;
+      const destLL  = ol.sphere.offset(centerLL, r, bearing);
+      ringCoords[i] = ol.proj.fromLonLat(destLL, 'EPSG:3978');
+    }
+    const ring = new ol.Feature({
+      geometry: new ol.geom.Polygon([ringCoords]),
+    });
+    ring.set('rangeType', 'ring');
+    rangeSource.addFeature(ring);
+
+    // Label at exactly r meters NE of center (bearing = π/4) — same
+    // geodesic logic, so the label sits on the ring not just near it.
+    const labelLL    = ol.sphere.offset(centerLL, r, Math.PI / 4);
+    const labelCoord = ol.proj.fromLonLat(labelLL, 'EPSG:3978');
+    const label = new ol.Feature({
+      geometry: new ol.geom.Point(labelCoord),
+    });
+    label.set('rangeType', 'label');
+    label.set('text', `${r / 1000} km`);
+    rangeSource.addFeature(label);
+  }
+  // Reveal the Clear affordance now that rings exist. The help blurb is now
+  // a separate (i)-button toggle, so placing rings no longer hides it.
+  rangeClear.hidden = false;
+}
+
+// Bottom-left tool widget. Range Rings toggle drives the click-to-place
+// mode; Clear shows once rings exist; (i) info button toggles a persistent
+// help blurb independently of the tool's active state — the user can read
+// the instructions before, during, or after using the tool.
+const rangeBtn   = document.getElementById('range-tool-btn');
+const rangeClear = document.getElementById('range-tool-clear');
+const rangeHint  = document.getElementById('range-tool-hint');
+const rangeInfo  = document.getElementById('range-tool-info');
+
+function setRangeToolActive(active) {
+  rangeToolActive = active;
+  rangeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  // Crosshair cursor signals the click-to-place mode is live.
+  map.getTargetElement().style.cursor = active ? 'crosshair' : '';
+  if (!active) {
+    clearRangeRings();
+    rangeClear.hidden = true;
+  }
+}
+
+rangeBtn.addEventListener('click', () => setRangeToolActive(!rangeToolActive));
+rangeClear.addEventListener('click', () => {
+  clearRangeRings();
+  rangeClear.hidden = true;
+});
+rangeInfo.addEventListener('click', () => {
+  const showing = !rangeHint.hasAttribute('hidden');
+  if (showing) rangeHint.setAttribute('hidden', '');
+  else rangeHint.removeAttribute('hidden');
+  rangeInfo.setAttribute('aria-pressed', showing ? 'false' : 'true');
+});
+
+// =============================================================
+// POI overlays — airports, hospitals, Walmart stores
+// =============================================================
+// Three GeoJSON datasets (pre-clipped to scenario land — see
+// scripts/build_overlays.py) feed ONE combined cluster layer. Points are
+// tagged with `_poiKind` on load and added to a shared combined source;
+// the cluster source wraps that combined source and filters via its
+// geometryFunction to only include kinds the user has enabled.
+//
+// Why combined (not per-kind) clustering: a hospital and a Walmart on
+// the same block should fuse into a single "2" bubble, not stack two
+// per-kind bubbles on top of each other. The reference screenshot uses
+// the same convention — count is across all visible overlays.
+
+// Per-kind single-feature style (used when a cluster wraps exactly one
+// point) — colored disc + glyph. Built once each, reused for every render.
+function poiStyle({ fill, stroke, glyph, glyphFill }) {
+  return new ol.style.Style({
+    image: new ol.style.Circle({
+      radius: 7,
+      fill:   new ol.style.Fill({ color: fill }),
+      stroke: new ol.style.Stroke({ color: stroke, width: 1.2 }),
+    }),
+    text: new ol.style.Text({
+      text: glyph,
+      font: '700 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fill: new ol.style.Fill({ color: glyphFill }),
+      textAlign: 'center',
+      textBaseline: 'middle',
+      offsetY: 0.5,  // pixel-perfect centering of the glyph in the disc
+    }),
+  });
+}
+
+const POI_KINDS = [
+  // All three kinds tier on `tier` → see *_TIER_STYLES + resolvePoiStyle.
+  { kind: 'airport',  url: 'data/airports.geojson',  panelId: 'airports' },
+  { kind: 'hospital', url: 'data/hospitals.geojson', panelId: 'hospitals' },
+  { kind: 'walmart',  url: 'data/walmarts.geojson',  panelId: 'walmarts' },
+];
+
+// Hospital tiering — the `tier` property on each hospital feature
+// (computed in scripts/build_overlays.py from HIFLD TYPE/TRAUMA/BEDS,
+// ODHF facility-name keywords, or OSM amenity/emergency tags) drives the
+// fill color. Same white "H" glyph in all three for instant kind recognition;
+// red→orange→peach communicates the capability gradient at a glance.
+const HOSPITAL_TIER_COLORS = {
+  major:    { fill: '#B11226', stroke: '#4a0000', label: 'Major'    },
+  standard: { fill: '#E07B00', stroke: '#5a3000', label: 'Standard' },
+  limited:  { fill: '#E8A87C', stroke: '#7a3f1c', label: 'Limited'  },
+};
+const HOSPITAL_TIER_STYLES = Object.fromEntries(
+  Object.entries(HOSPITAL_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'H', glyphFill: '#fff' })])
+);
+
+// Airport tiering — the `tier` property on each airport feature
+// (computed in scripts/build_overlays.py from the longest runway length and
+// surface, with USAF cargo-aircraft minima as anchors) drives the fill color.
+// Same white ✈ glyph in all three. Dark→cyan→sky gradient = heavy→light.
+const AIRPORT_TIER_COLORS = {
+  major:    { fill: '#023E8A', stroke: '#001A4A', label: 'Heavy (C-5)'  },
+  standard: { fill: '#0077B6', stroke: '#002B4A', label: 'Medium (C-17)' },
+  limited:  { fill: '#00B4D8', stroke: '#003049', label: 'Light (C-130)' },
+};
+const AIRPORT_TIER_STYLES = Object.fromEntries(
+  Object.entries(AIRPORT_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: '✈', glyphFill: '#fff' })])
+);
+
+// Walmart tiering — store format by physical footprint (computed in
+// scripts/build_overlays.py from OSM `shop`/`amenity`/`name` tags).
+// Walmart brand palette is yellow + blue, so we keep the glyph (W) blue
+// on yellow for the Supercenter (the recognisable storefront look) and
+// shift the smaller formats to navy/cyan with white W's so the size
+// gradient reads at a glance.
+//   major    — Supercenter        : Walmart-yellow #FFC220, blue W
+//   standard — Discount Store     : Walmart-blue   #0071CE, white W
+//   limited  — Neighborhood Market: light azure    #5DA9E9, white W
+const WALMART_TIER_COLORS = {
+  major:    { fill: '#FFC220', stroke: '#0071CE', glyphFill: '#0071CE',
+              label: 'Supercenter' },
+  standard: { fill: '#0071CE', stroke: '#003F7A', glyphFill: '#FFC220',
+              label: 'Discount Store' },
+  limited:  { fill: '#5DA9E9', stroke: '#003F7A', glyphFill: '#fff',
+              label: 'Neighborhood Market' },
+};
+const WALMART_TIER_STYLES = Object.fromEntries(
+  Object.entries(WALMART_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'W', glyphFill: c.glyphFill })])
+);
+
+// poiEnabled drives the cluster source's geometryFunction. Toggles flip
+// these flags and call clusterSource.refresh() to re-cluster from scratch.
+const poiEnabled    = { airport: false, hospital: false, walmart: false };
+
+// One-stop style resolver for single POI features (called when a cluster
+// wraps exactly one point). All three kinds dispatch on `tier`.
+function resolvePoiStyle(feature) {
+  const kind = feature.get('_poiKind');
+  const tier = feature.get('tier');
+  if (kind === 'airport')  return AIRPORT_TIER_STYLES[tier]  || AIRPORT_TIER_STYLES.limited;
+  if (kind === 'hospital') return HOSPITAL_TIER_STYLES[tier] || HOSPITAL_TIER_STYLES.standard;
+  if (kind === 'walmart')  return WALMART_TIER_STYLES[tier]  || WALMART_TIER_STYLES.standard;
+  return null;
+}
+
+// ----- Generic count-bubble style -----
+// Three color tiers matched to the three size tiers — small clusters are
+// cool (blue), medium amber, large hot red. Breakpoints at 10 and 100 align
+// with the radius/font-size tiers below so a bubble's color and size both
+// step at the same count thresholds. Halo is a low-alpha rim in the same hue.
+const CLUSTER_TIERS = [
+  // { max: exclusive upper bound, fill, halo }
+  { max: 10,       fill: '#1f4e8c', halo: 'rgba(31,78,140,0.30)'  }, // small  (blue)
+  { max: 100,      fill: '#E89216', halo: 'rgba(232,146,22,0.32)' }, // medium (amber)
+  { max: Infinity, fill: '#D7263D', halo: 'rgba(215,38,61,0.32)'  }, // large  (red)
+];
+
+const _clusterStyleCache = new Map();   // count -> Style[]
+function clusterBubbleStyle(count) {
+  const cached = _clusterStyleCache.get(count);
+  if (cached) return cached;
+  const tier = CLUSTER_TIERS.find(t => count < t.max);
+  const fill = tier.fill, halo = tier.halo;
+  const r     = count < 10 ? 12 : count < 100 ? 15 : 19;
+  const fSize = count < 10 ? 11 : count < 100 ? 12 : 13;
+  const styles = [
+    new ol.style.Style({
+      image: new ol.style.Circle({
+        radius: r + 7,
+        fill: new ol.style.Fill({ color: halo }),
+      }),
+    }),
+    new ol.style.Style({
+      image: new ol.style.Circle({
+        radius: r,
+        fill: new ol.style.Fill({ color: fill }),
+        stroke: new ol.style.Stroke({ color: '#fff', width: 1.5 }),
+      }),
+      text: new ol.style.Text({
+        text: String(count),
+        font: `700 ${fSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`,
+        fill: new ol.style.Fill({ color: '#fff' }),
+        textAlign: 'center',
+        textBaseline: 'middle',
+      }),
+    }),
+  ];
+  _clusterStyleCache.set(count, styles);
+  return styles;
+}
+
+// Helper: true if a hit feature came from the cluster source AND wraps >1.
+function isCluster(feature) {
+  const inner = feature.get('features');
+  return Array.isArray(inner) && inner.length > 1;
+}
+// Helper: return the underlying POI feature from a cluster wrapper of size 1,
+// or the feature itself if it's already an unwrapped POI.
+function unwrapPoi(feature) {
+  const inner = feature.get('features');
+  return inner && inner.length ? inner[0] : feature;
+}
+
+// Combined source — all features from all kinds, each tagged with _poiKind.
+// Populated by direct fetch() of each GeoJSON file. We don't use the usual
+// `new ol.source.Vector({ url, format })` form here because that source
+// only triggers its loader when attached to a rendering layer — and the
+// raw sources aren't (only the cluster layer renders). Skipping the OL
+// loader machinery and parsing GeoJSON manually keeps the data path
+// straightforward and makes the load order easy to reason about.
+const poiCombinedSource = new ol.source.Vector();
+const _poiGeoJsonFormat = new ol.format.GeoJSON({
+  dataProjection:    'EPSG:4326',
+  featureProjection: 'EPSG:3978',
+});
+for (const cfg of POI_KINDS) {
+  fetch(cfg.url)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(gj => {
+      const feats = _poiGeoJsonFormat.readFeatures(gj);
+      for (const f of feats) f.set('_poiKind', cfg.kind);
+      poiCombinedSource.addFeatures(feats);
+      const countEl = document.getElementById(cfg.panelId + '-count');
+      if (countEl) countEl.textContent = `(${feats.length.toLocaleString()})`;
+      // If the user flipped this kind's toggle on before its data finished
+      // loading, kick the cluster source so it picks the new features up.
+      if (poiEnabled[cfg.kind]) poiClusterSource.refresh();
+    })
+    .catch((err) => {
+      console.warn(`[poi:${cfg.kind}] load failed:`, err);
+      const countEl = document.getElementById(cfg.panelId + '-count');
+      if (countEl) countEl.textContent = '(load failed)';
+    });
+}
+
+// Cluster source — wraps the combined source, but its geometryFunction
+// filters out any feature whose kind is currently disabled. Toggling a
+// kind off → those features return null geometry → cluster ignores them.
+// 40 px between cluster centers (default 20 is too tight at low zoom);
+// 20 px minimum gap keeps neighbouring bubbles from fusing visually.
+const poiClusterSource = new ol.source.Cluster({
+  source: poiCombinedSource,
+  distance: 40,
+  minDistance: 20,
+  geometryFunction: (feature) => {
+    if (!poiEnabled[feature.get('_poiKind')]) return null;
+    return feature.getGeometry();
+  },
+});
+
+// Single cluster layer. Singletons render with their per-kind glyph style;
+// any cluster of 2+ renders as a generic count bubble (blue or red).
+// Layer-level visibility tracks "any kind enabled?" so OL skips rendering
+// entirely when the user has every overlay turned off.
+const poiClusterLayer = new ol.layer.Vector({
+  source: poiClusterSource,
+  visible: false,
+  zIndex: 82,
+  style: (feature) => {
+    const inner = feature.get('features');
+    if (!inner || inner.length === 1) {
+      return resolvePoiStyle(inner ? inner[0] : feature);
+    }
+    return clusterBubbleStyle(inner.length);
+  },
+});
+map.addLayer(poiClusterLayer);
+
+// Toggle handlers — flip the enabled flag, sync layer visibility to the
+// "any enabled?" predicate, and force the cluster source to recompute
+// (refresh() re-runs the geometryFunction over every feature).
+function anyPoiEnabled() {
+  return poiEnabled.airport || poiEnabled.hospital || poiEnabled.walmart;
+}
+for (const cfg of POI_KINDS) {
+  document.getElementById('toggle-' + cfg.panelId).addEventListener('change', (e) => {
+    poiEnabled[cfg.kind] = e.target.checked;
+    poiClusterLayer.setVisible(anyPoiEnabled());
+    poiClusterSource.refresh();
+  });
+}
+
+// Extend the existing click handler so a click on a POI shows its popup.
+// We register a NEW click listener (the country handler in §click popup
+// already returned without opening on null features, so it does no harm —
+// but if a POI sits on top of a country, we want the POI to win).
+function renderPoiPopup(feature) {
+  const p = feature.getProperties();
+  const kind = p._poiKind;
+  let title, badge, rows = '';
+  if (kind === 'airport') {
+    title = p.name || 'Airport';
+    const tier = AIRPORT_TIER_COLORS[p.tier] || AIRPORT_TIER_COLORS.limited;
+    badge = `AIRPORT · ${tier.label.toUpperCase()}`;
+    // Runway: prefer paved, fall back to hard-surface ("3,500 ft hard" reads
+    // differently to a planner than "3,500 ft paved", so be explicit).
+    const rwLabel = p.longest_paved_ft && p.longest_paved_ft > 0
+        ? `${p.longest_paved_ft.toLocaleString()} ft paved`
+        : (p.longest_hard_ft && p.longest_hard_ft > 0
+            ? `${p.longest_hard_ft.toLocaleString()} ft hard`
+            : (p.longest_ft && p.longest_ft > 0 ? `${p.longest_ft.toLocaleString()} ft` : ''));
+    rows = `
+      ${p.iata ? `<span class="k">IATA</span><span class="v">${p.iata}</span>` : ''}
+      ${p.icao ? `<span class="k">ICAO</span><span class="v">${p.icao}</span>` : ''}
+      ${rwLabel ? `<span class="k">Runway</span><span class="v">${rwLabel}</span>` : ''}
+      ${p.municipality ? `<span class="k">City</span><span class="v">${p.municipality}</span>` : ''}
+      ${p.iso_region ? `<span class="k">Region</span><span class="v">${p.iso_region}</span>` : ''}`;
+  } else if (kind === 'hospital') {
+    title = p.name || 'Hospital';
+    const tier = HOSPITAL_TIER_COLORS[p.tier] || HOSPITAL_TIER_COLORS.standard;
+    badge = `HOSPITAL · ${tier.label.toUpperCase()}`;
+    const loc = [p.city, p.region].filter(Boolean).join(', ');
+    rows = `
+      ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
+      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
+      ${p.beds ? `<span class="k">Beds</span><span class="v">${p.beds}</span>` : ''}
+      ${p.trauma ? `<span class="k">Trauma</span><span class="v">${p.trauma}</span>` : ''}
+      ${p.helipad === 'Y' ? `<span class="k">Helipad</span><span class="v">Yes</span>` : ''}
+      ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
+  } else if (kind === 'walmart') {
+    title = p.name || 'Walmart';
+    const tier = WALMART_TIER_COLORS[p.tier] || WALMART_TIER_COLORS.standard;
+    badge = `WALMART · ${tier.label.toUpperCase()}`;
+    const loc = [p.city, p.region].filter(Boolean).join(', ');
+    rows = `
+      ${p.addr ? `<span class="k">Address</span><span class="v">${p.addr}</span>` : ''}
+      ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
+      ${p.osm_id ? `<span class="k">OSM</span><span class="v">${p.osm_id}</span>` : ''}`;
+  } else {
+    return null;
+  }
+  return `
+    <h3>${title}</h3>
+    <div class="kv">
+      <span class="k">Type</span><span class="v"><span class="badge">${badge}</span></span>
+      ${rows}
+    </div>`;
+}
+
+map.on('click', (evt) => {
+  if (rangeToolActive) return;  // range tool already handled by earlier listener
+  if (!poiClusterLayer.getVisible()) return;
+  const hit = map.forEachFeatureAtPixel(evt.pixel,
+    (fr, layer) => layer === poiClusterLayer ? fr : null,
+    { hitTolerance: 4 },
+  );
+  if (!hit) return;
+
+  // Cluster bubble: zoom to fit its members. If all members share one point
+  // (extent has zero area), bump the zoom manually since view.fit() of a
+  // degenerate extent is a no-op.
+  if (isCluster(hit)) {
+    const inner = hit.get('features');
+    const ext = ol.extent.createEmpty();
+    for (const f of inner) ol.extent.extend(ext, f.getGeometry().getExtent());
+    const view = map.getView();
+    const w = ext[2] - ext[0], h = ext[3] - ext[1];
+    if (w === 0 && h === 0) {
+      view.animate({
+        center: hit.getGeometry().getCoordinates(),
+        zoom: Math.min((view.getZoom() || 0) + 2, view.getMaxZoom()),
+        duration: 300,
+      });
+    } else {
+      view.fit(ext, { padding: [60, 60, 60, 60], duration: 300, maxZoom: 12 });
+    }
+    popupEl.style.display = 'none';
+    return;
+  }
+
+  // Singleton — unwrap to the underlying POI feature for the popup.
+  const poi = unwrapPoi(hit);
+  const html = renderPoiPopup(poi);
+  if (!html) return;
+  popupBody.innerHTML = html;
+  popupEl.style.display = '';
+  // Position the popup at the feature's actual point geometry, not the
+  // click pixel — keeps the popup anchored if the user pans afterward.
+  popupOverlay.setPosition(poi.getGeometry().getCoordinates());
+});
+
+// Extend hover: pointer cursor over POI markers and cluster bubbles.
+map.on('pointermove', (evt) => {
+  if (evt.dragging || rangeToolActive) return;
+  if (!poiClusterLayer.getVisible()) return;
+  const f = map.forEachFeatureAtPixel(evt.pixel,
+    (fr, layer) => layer === poiClusterLayer ? fr : null,
+    { hitTolerance: 4 },
+  );
+  if (f) map.getTargetElement().style.cursor = 'pointer';
+});
+
+// ----- POI dropdown (mirrors the existing layers dropdown behavior) -----
+const poiControl = document.getElementById('poi-control');
+const poiToggle  = document.getElementById('poi-toggle');
+const poiPanel   = document.getElementById('poi-panel');
+function setPoiOpen(open) {
+  poiControl.classList.toggle('open', open);
+  poiToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) poiPanel.removeAttribute('hidden');
+  else poiPanel.setAttribute('hidden', '');
+}
+poiToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setPoiOpen(!poiControl.classList.contains('open'));
+  // Auto-close the sibling dropdowns so they don't overlap on narrow screens.
+  setLayersOpen(false);
+  setInfoOpen(false);
+});
+poiPanel.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => setPoiOpen(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && poiControl.classList.contains('open')) {
+    setPoiOpen(false);
+    poiToggle.focus();
+  }
+});
+
+// ----- Data-sources (info) dropdown -----
+// Static content, leftmost of the three top-right controls. Same open/close
+// pattern as the other two — click-outside and Escape close it.
+const infoControl = document.getElementById('info-control');
+const infoToggle  = document.getElementById('info-toggle');
+const infoPanel   = document.getElementById('info-panel');
+function setInfoOpen(open) {
+  infoControl.classList.toggle('open', open);
+  infoToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) infoPanel.removeAttribute('hidden');
+  else infoPanel.setAttribute('hidden', '');
+}
+infoToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setInfoOpen(!infoControl.classList.contains('open'));
+  setLayersOpen(false);
+  setPoiOpen(false);
+});
+infoPanel.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => setInfoOpen(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && infoControl.classList.contains('open')) {
+    setInfoOpen(false);
+    infoToggle.focus();
+  }
+});
+
+// =============================================================
+// Layers panel dropdown
+// =============================================================
+// ----- Layers panel dropdown -----
+// The panel is hidden by default; the layers icon toggles it. Closes on
+// click-outside or Escape. The panel itself is `stopPropagation` so that
+// interacting with controls inside doesn't trigger the outside-click close.
+const layersControl = document.getElementById('layers-control');
+const layersToggle  = document.getElementById('layers-toggle');
+const layersPanel   = document.getElementById('layers-panel');
+
+function setLayersOpen(open) {
+  layersControl.classList.toggle('open', open);
+  layersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) layersPanel.removeAttribute('hidden');
+  else layersPanel.setAttribute('hidden', '');
+}
+layersToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setLayersOpen(!layersControl.classList.contains('open'));
+  // Close the sibling dropdowns so the panels don't overlap.
+  setPoiOpen(false);
+  setInfoOpen(false);
+});
+layersPanel.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => setLayersOpen(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && layersControl.classList.contains('open')) {
+    setLayersOpen(false);
+    layersToggle.focus();
+  }
+});

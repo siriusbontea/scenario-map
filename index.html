@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<!--
+  Scenario Web Map (OpenLayers build)
+  Source data: ../Shape Files/ (ESRI shapefiles, EPSG:3857)
+  Reprojected to EPSG:4326 GeoJSON in ./data/
+
+  Files:
+    index.html  — page skeleton (this file)
+    style.css   — all custom styling
+    map.js      — map setup, projection, vector layers, weather overlays
+    data/       — scenario.geojson, ocean.geojson
+
+  To view: serve this folder over HTTP (fetch() does not work from file://).
+    python3 -m http.server 8000   (from this WebMap directory)
+    then open http://localhost:8000/
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scenario Map</title>
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.5.0/ol.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="title-bar">
+    Scenario Map
+  </div>
+
+  <div id="map"></div>
+  <div id="coords" class="coords">
+    <div id="coords-latlon">Move cursor for coordinates</div>
+    <div id="coords-mgrs"></div>
+  </div>
+
+  <!-- Data-sources dropdown — leftmost of the three top-right controls -->
+  <div class="layers-control layers-control--info" id="info-control">
+    <button class="layers-toggle" id="info-toggle" type="button"
+            aria-label="Toggle data sources panel" aria-expanded="false"
+            aria-controls="info-panel" title="Data sources">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+    </button>
+    <div class="weather-panel info-panel" id="info-panel" hidden>
+      <h4>Data Sources</h4>
+
+      <div class="info-group">Scenario polygons</div>
+      <div class="info-row">Scenario shapefiles (custom — reprojected to EPSG:4326 GeoJSON)</div>
+
+      <div class="info-group">Basemaps</div>
+      <div class="info-row">
+        <b>Hillshade / Relief</b> —
+        <a href="https://www.arcgis.com/home/item.html?id=1b243539f4514b6ba35e7d995890db1d"
+           target="_blank" rel="noopener">Esri World Hillshade</a>
+        (&copy; Esri, USGS, NOAA)
+      </div>
+      <div class="info-row">
+        <b>Transportation</b> —
+        <a href="https://www.openstreetmap.org/copyright"
+           target="_blank" rel="noopener">OpenStreetMap</a>
+        (&copy; OSM contributors, ODbL)
+      </div>
+      <div class="info-row">
+        <b>Satellite Imagery</b> —
+        <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9"
+           target="_blank" rel="noopener">Esri World Imagery</a>
+        (&copy; Esri, Maxar, Earthstar Geographics)
+      </div>
+      <div class="info-row">
+        <b>OpenTopoMap</b> —
+        <a href="https://opentopomap.org/about" target="_blank" rel="noopener">OpenTopoMap</a>
+        (CC-BY-SA), &copy; OSM contributors
+      </div>
+
+      <div class="info-group">Weather overlays</div>
+      <div class="info-row">
+        <b>Radar</b> (1 km / 6 min) —
+        <a href="https://eccc-msc.github.io/open-data/msc-geomet/readme_geomet_en/"
+           target="_blank" rel="noopener">Environment Canada GeoMet</a>
+        (<code>RADAR_1KM_RRAI</code>)
+      </div>
+      <div class="info-row">
+        <b>Cloud cover</b> (15 km / hourly) —
+        <a href="https://eccc-msc.github.io/open-data/msc-geomet/readme_geomet_en/"
+           target="_blank" rel="noopener">Environment Canada GeoMet</a>
+        (<code>GDPS_15km_TotalCloudCover</code>)
+      </div>
+
+      <div class="info-group">Point overlays</div>
+      <div class="info-row">
+        <b>Military-capable airfields</b> —
+        <a href="https://ourairports.com/data/" target="_blank" rel="noopener">OurAirports</a>
+        (CC0 / Public Domain), joined with <code>runways.csv</code> for
+        runway length and surface.
+      </div>
+      <div class="info-row info-row--note">
+        Airport tier (<span class="poi-tier-dot" style="background:#023E8A"></span>C-5 /
+        <span class="poi-tier-dot" style="background:#0077B6"></span>C-17 /
+        <span class="poi-tier-dot" style="background:#00B4D8"></span>C-130) derived from
+        the longest open runway: <b>C-5</b> ≥ 8,000 ft paved, <b>C-17</b> ≥ 6,000 ft paved,
+        <b>C-130</b> ≥ 4,000 ft hard surface (paved OR gravel/oiled). Anything shorter
+        is dropped.
+      </div>
+      <div class="info-row">
+        <b>Hospitals (US)</b> —
+        <a href="https://hifld-geoplatform.opendata.arcgis.com/"
+           target="_blank" rel="noopener">HIFLD Hospitals</a>
+        via FEMA-hosted ArcGIS service.
+      </div>
+      <div class="info-row">
+        <b>Hospitals (CA)</b> —
+        <a href="https://www.statcan.gc.ca/en/lode/databases/odhf"
+           target="_blank" rel="noopener">StatCan Open Database of Healthcare Facilities v1.1</a>
+        (Statistics Canada Open License).
+      </div>
+      <div class="info-row">
+        <b>Hospitals (GL / IS)</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>amenity=hospital|clinic</code>, ODbL). HIFLD and ODHF have no coverage outside US/CA.
+      </div>
+      <div class="info-row info-row--note">
+        Hospital tier (<span class="poi-tier-dot" style="background:#B11226"></span>Major /
+        <span class="poi-tier-dot" style="background:#E07B00"></span>Standard /
+        <span class="poi-tier-dot" style="background:#E8A87C"></span>Limited) is derived at fetch time:
+        HIFLD uses <code>TRAUMA</code>+<code>TYPE</code>+<code>BEDS</code>; ODHF uses facility-name
+        keyword match; OSM uses <code>emergency</code>/<code>amenity</code> tags.
+      </div>
+      <div class="info-row">
+        <b>Walmart stores</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>brand=Walmart</code>, ODbL).
+      </div>
+      <div class="info-row info-row--note">
+        Walmart tier (<span class="poi-tier-dot" style="background:#FFC220"></span>Supercenter /
+        <span class="poi-tier-dot" style="background:#0071CE"></span>Discount Store /
+        <span class="poi-tier-dot" style="background:#5DA9E9"></span>Neighborhood Market)
+        derived from OSM <code>shop</code>/<code>amenity</code>/<code>name</code> tags.
+        Sub-section artifacts (pharmacy counters, garden centres, trolley bays, photo labs)
+        are dropped — they aren't separate destinations.
+      </div>
+
+      <div class="info-footer">
+        Point data clipped to scenario land polygons at fetch time
+        (point-in-polygon test). Last refreshed when
+        <code>scripts/build_overlays.py</code> was run.
+      </div>
+    </div>
+  </div>
+
+  <!-- POI overlays — second dropdown, sits left of the basemap/weather one -->
+  <div class="layers-control layers-control--poi" id="poi-control">
+    <button class="layers-toggle" id="poi-toggle" type="button"
+            aria-label="Toggle POI overlays panel" aria-expanded="false"
+            aria-controls="poi-panel" title="Overlays">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 22s8-7.58 8-13a8 8 0 1 0-16 0c0 5.42 8 13 8 13z"></path>
+        <circle cx="12" cy="9" r="3"></circle>
+      </svg>
+    </button>
+    <div class="weather-panel" id="poi-panel" hidden>
+      <h4>Point Overlays</h4>
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-airports">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#023E8A"></span>
+          <span style="background:#0077B6"></span>
+          <span style="background:#00B4D8"></span>
+        </span>
+        Military-capable airfields
+        <span id="airports-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#023E8A"></span>C-5</span>
+        <span><span class="poi-tier-dot" style="background:#0077B6"></span>C-17</span>
+        <span><span class="poi-tier-dot" style="background:#00B4D8"></span>C-130</span>
+      </div>
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-hospitals">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#B11226"></span>
+          <span style="background:#E07B00"></span>
+          <span style="background:#E8A87C"></span>
+        </span>
+        Hospitals
+        <span id="hospitals-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#B11226"></span>Major</span>
+        <span><span class="poi-tier-dot" style="background:#E07B00"></span>Standard</span>
+        <span><span class="poi-tier-dot" style="background:#E8A87C"></span>Limited</span>
+      </div>
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-walmarts">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#FFC220"></span>
+          <span style="background:#0071CE"></span>
+          <span style="background:#5DA9E9"></span>
+        </span>
+        Walmart stores
+        <span id="walmarts-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#FFC220"></span>Supercenter</span>
+        <span><span class="poi-tier-dot" style="background:#0071CE"></span>Discount</span>
+        <span><span class="poi-tier-dot" style="background:#5DA9E9"></span>Neighborhood</span>
+      </div>
+      <div class="poi-source">Sources: OurAirports, HIFLD &amp; StatCan ODHF, OpenStreetMap</div>
+    </div>
+  </div>
+
+  <div class="layers-control" id="layers-control">
+    <button class="layers-toggle" id="layers-toggle" type="button"
+            aria-label="Toggle layers panel" aria-expanded="false"
+            aria-controls="layers-panel" title="Layers">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>
+    </button>
+    <div class="weather-panel" id="layers-panel" hidden>
+    <h4>Basemap</h4>
+    <label class="weather-toggle">
+      <input type="radio" name="basemap" value="none" checked> None
+    </label>
+    <label class="weather-toggle">
+      <input type="radio" name="basemap" value="hillshade"> Hillshade / Relief
+    </label>
+    <label class="weather-toggle">
+      <input type="radio" name="basemap" value="transport"> Transportation
+    </label>
+    <label class="weather-toggle">
+      <input type="radio" name="basemap" value="satellite"> Satellite Imagery
+    </label>
+    <label class="weather-toggle">
+      <input type="radio" name="basemap" value="topo"> OpenTopoMap
+    </label>
+    <label class="weather-toggle" style="margin-top:6px">
+      <input type="checkbox" id="toggle-country-tint"> Country tint
+      (<span id="country-tint-value">40</span>%)
+    </label>
+    <input type="range" id="country-tint-slider" class="tint-slider"
+           min="0" max="100" step="5" value="40" disabled
+           aria-label="Country tint opacity">
+
+    <hr />
+
+    <h4>Weather Overlays (Real-world)</h4>
+    <label class="weather-toggle">
+      <input type="checkbox" id="toggle-radar"> Radar — 1 km / 6 min
+      <span id="radar-loading" class="anim-loading"></span>
+    </label>
+    <label class="weather-toggle">
+      <input type="checkbox" id="toggle-cloud"> Cloud cover — 15 km / hourly
+      <span id="cloud-loading" class="anim-loading"></span>
+    </label>
+    <div id="master-controls" class="anim-controls" style="display:none">
+      <div class="anim-row">
+        <button id="master-play" class="anim-btn" title="Play / Pause">⏸</button>
+        <input type="range" id="master-slider" min="0" max="29" value="29" step="1" />
+      </div>
+      <div class="anim-time" id="master-time">--:--Z</div>
+      <div class="anim-source">Synced timeline · Environment Canada GeoMet</div>
+    </div>
+    </div>
+  </div>
+
+  <!-- Bottom-left stack: legend on top, range tool below. The whole stack is
+       anchored to the bottom-left of the map; height is content-driven so
+       expanding the range tool (Clear button + hint row) automatically
+       pushes the legend up rather than overlapping it. -->
+  <div class="bottom-left-stack">
+    <div class="legend" id="legend" hidden></div>
+    <div class="range-tool" id="range-tool">
+      <button class="range-tool-btn" id="range-tool-btn" type="button"
+              aria-pressed="false" aria-label="Toggle range rings tool"
+              title="Range Rings — toggle, then click on the map to drop rings.">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <circle cx="12" cy="12" r="6"></circle>
+          <circle cx="12" cy="12" r="2"></circle>
+        </svg>
+        <span class="range-tool-label">Range Rings</span>
+        <span class="range-switch" aria-hidden="true">
+          <span class="range-switch-thumb"></span>
+        </span>
+      </button>
+      <button class="range-tool-info" id="range-tool-info" type="button"
+              aria-pressed="false" aria-label="Toggle range rings help"
+              aria-controls="range-tool-hint" title="About range rings">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none"
+             stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </button>
+      <button class="range-tool-clear" id="range-tool-clear" type="button"
+              title="Clear placed rings" aria-label="Clear rings" hidden>Clear</button>
+      <div class="range-tool-hint" id="range-tool-hint" hidden>
+        Drops concentric rings at <b>250 / 500 / 750 / 1000 km</b> from the click point.
+        Toggle <b>Range Rings</b> on, click the map to place; click again to relocate.
+        Use <b>Clear</b> to remove them.
+      </div>
+    </div>
+  </div>
+
+  <div id="popup" class="ol-popup" style="display:none">
+    <span class="ol-popup-close" id="popup-close">×</span>
+    <div id="popup-content"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/proj4@2.10.0/dist/proj4.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ol@10.5.0/dist/ol.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mgrs@2.1.0/dist/mgrs.js"></script>
+  <script src="map.js"></script>
+</body>
+</html>
