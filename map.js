@@ -1002,10 +1002,18 @@ function poiStyle({ fill, stroke, glyph, glyphFill }) {
 }
 
 const POI_KINDS = [
-  // All three kinds tier on `tier` → see *_TIER_STYLES + resolvePoiStyle.
-  { kind: 'airport',  url: 'data/airports.geojson',  panelId: 'airports' },
-  { kind: 'hospital', url: 'data/hospitals.geojson', panelId: 'hospitals' },
-  { kind: 'walmart',  url: 'data/walmarts.geojson',  panelId: 'walmarts' },
+  // All eight kinds tier on `tier` → see *_TIER_STYLES + resolvePoiStyle.
+  // First three are the original tactical-planning layers; remaining
+  // five (military / corrections / schools / food / ltc) were added for
+  // BoldQuest 26 pathogen-spread TTX modelling.
+  { kind: 'airport',     url: 'data/airports.geojson',    panelId: 'airports' },
+  { kind: 'hospital',    url: 'data/hospitals.geojson',   panelId: 'hospitals' },
+  { kind: 'walmart',     url: 'data/walmarts.geojson',    panelId: 'walmarts' },
+  { kind: 'military',    url: 'data/military.geojson',    panelId: 'military' },
+  { kind: 'corrections', url: 'data/corrections.geojson', panelId: 'corrections' },
+  { kind: 'school',      url: 'data/schools.geojson',     panelId: 'schools' },
+  { kind: 'food',        url: 'data/food.geojson',        panelId: 'food' },
+  { kind: 'ltc',         url: 'data/ltc.geojson',         panelId: 'ltc' },
 ];
 
 // Hospital tiering — the `tier` property on each hospital feature
@@ -1059,18 +1067,90 @@ const WALMART_TIER_STYLES = Object.fromEntries(
     [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'W', glyphFill: c.glyphFill })])
 );
 
+// Military installations — olive gradient. Major = active-duty base,
+// Standard = guard/reserve/barracks, Limited = range/training area.
+// Star glyph (★) is universally military-coded; renders well at 9 px.
+const MILITARY_TIER_COLORS = {
+  major:    { fill: '#3F4D2F', stroke: '#1F2818', label: 'Base'             },
+  standard: { fill: '#7A8450', stroke: '#3A4220', label: 'Guard / Reserve'  },
+  limited:  { fill: '#B5C18E', stroke: '#5A6A38', label: 'Range / Training' },
+};
+const MILITARY_TIER_STYLES = Object.fromEntries(
+  Object.entries(MILITARY_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: '★', glyphFill: '#fff' })])
+);
+
+// Correctional facilities — slate gradient. Major = federal/max,
+// Standard = state/medium, Limited = local/juvenile. P glyph for prison.
+const CORRECTIONS_TIER_COLORS = {
+  major:    { fill: '#2F3E46', stroke: '#0E1B22', label: 'Federal / Maximum' },
+  standard: { fill: '#52796F', stroke: '#234038', label: 'State / Medium'    },
+  limited:  { fill: '#84A98C', stroke: '#3F6049', label: 'Local / Juvenile'  },
+};
+const CORRECTIONS_TIER_STYLES = Object.fromEntries(
+  Object.entries(CORRECTIONS_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'P', glyphFill: '#fff' })])
+);
+
+// Schools — purple gradient. Tier driven by HIFLD ENROLLMENT field where
+// available (Major = college/uni, Standard = K-12 ≥500, Limited = K-12
+// 100-499; below 100 dropped at fetch time). S glyph in white.
+const SCHOOL_TIER_COLORS = {
+  major:    { fill: '#5E2A84', stroke: '#2A0E40', label: 'College / University' },
+  standard: { fill: '#8E6CB0', stroke: '#3F2A60', label: 'K-12 (≥ 500)'        },
+  limited:  { fill: '#C4A7E0', stroke: '#5F3F88', label: 'K-12 (100–499)'      },
+};
+const SCHOOL_TIER_STYLES = Object.fromEntries(
+  Object.entries(SCHOOL_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'S', glyphFill: '#fff' })])
+);
+
+// Food production — brown gradient. Activity-driven: slaughter floors
+// (Major) drove the strongest documented food-industry COVID outbreaks,
+// processing (Standard), egg/other (Limited). F glyph.
+const FOOD_TIER_COLORS = {
+  major:    { fill: '#5C3317', stroke: '#2A1408', label: 'Slaughter'    },
+  standard: { fill: '#8B5A2B', stroke: '#3F2814', label: 'Processing'   },
+  limited:  { fill: '#C68E5E', stroke: '#5F3F22', label: 'Egg / Other'  },
+};
+const FOOD_TIER_STYLES = Object.fromEntries(
+  Object.entries(FOOD_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'F', glyphFill: '#fff' })])
+);
+
+// Long-term care — rose gradient. Clinical-acuity tier — Major = skilled
+// nursing (highest CFR in COVID-era LTC outbreaks), Standard = assisted
+// living, Limited = hospice/adult day. L glyph.
+const LTC_TIER_COLORS = {
+  major:    { fill: '#9D2A4E', stroke: '#4A0F23', label: 'Skilled Nursing' },
+  standard: { fill: '#C76B89', stroke: '#5F2A3A', label: 'Assisted Living' },
+  limited:  { fill: '#E8B6C1', stroke: '#7F4F5E', label: 'Hospice / Day'   },
+};
+const LTC_TIER_STYLES = Object.fromEntries(
+  Object.entries(LTC_TIER_COLORS).map(([t, c]) =>
+    [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'L', glyphFill: '#fff' })])
+);
+
 // poiEnabled drives the cluster source's geometryFunction. Toggles flip
 // these flags and call clusterSource.refresh() to re-cluster from scratch.
-const poiEnabled    = { airport: false, hospital: false, walmart: false };
+const poiEnabled = {
+  airport: false, hospital: false, walmart: false,
+  military: false, corrections: false, school: false, food: false, ltc: false,
+};
 
 // One-stop style resolver for single POI features (called when a cluster
-// wraps exactly one point). All three kinds dispatch on `tier`.
+// wraps exactly one point). All eight kinds dispatch on `tier`.
 function resolvePoiStyle(feature) {
   const kind = feature.get('_poiKind');
   const tier = feature.get('tier');
-  if (kind === 'airport')  return AIRPORT_TIER_STYLES[tier]  || AIRPORT_TIER_STYLES.limited;
-  if (kind === 'hospital') return HOSPITAL_TIER_STYLES[tier] || HOSPITAL_TIER_STYLES.standard;
-  if (kind === 'walmart')  return WALMART_TIER_STYLES[tier]  || WALMART_TIER_STYLES.standard;
+  if (kind === 'airport')     return AIRPORT_TIER_STYLES[tier]     || AIRPORT_TIER_STYLES.limited;
+  if (kind === 'hospital')    return HOSPITAL_TIER_STYLES[tier]    || HOSPITAL_TIER_STYLES.standard;
+  if (kind === 'walmart')     return WALMART_TIER_STYLES[tier]     || WALMART_TIER_STYLES.standard;
+  if (kind === 'military')    return MILITARY_TIER_STYLES[tier]    || MILITARY_TIER_STYLES.major;
+  if (kind === 'corrections') return CORRECTIONS_TIER_STYLES[tier] || CORRECTIONS_TIER_STYLES.standard;
+  if (kind === 'school')      return SCHOOL_TIER_STYLES[tier]      || SCHOOL_TIER_STYLES.standard;
+  if (kind === 'food')        return FOOD_TIER_STYLES[tier]        || FOOD_TIER_STYLES.standard;
+  if (kind === 'ltc')         return LTC_TIER_STYLES[tier]         || LTC_TIER_STYLES.standard;
   return null;
 }
 
@@ -1204,7 +1284,9 @@ map.addLayer(poiClusterLayer);
 // "any enabled?" predicate, and force the cluster source to recompute
 // (refresh() re-runs the geometryFunction over every feature).
 function anyPoiEnabled() {
-  return poiEnabled.airport || poiEnabled.hospital || poiEnabled.walmart;
+  return poiEnabled.airport || poiEnabled.hospital || poiEnabled.walmart
+      || poiEnabled.military || poiEnabled.corrections || poiEnabled.school
+      || poiEnabled.food || poiEnabled.ltc;
 }
 for (const cfg of POI_KINDS) {
   document.getElementById('toggle-' + cfg.panelId).addEventListener('change', (e) => {
@@ -1260,6 +1342,64 @@ function renderPoiPopup(feature) {
       ${p.addr ? `<span class="k">Address</span><span class="v">${p.addr}</span>` : ''}
       ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
       ${p.osm_id ? `<span class="k">OSM</span><span class="v">${p.osm_id}</span>` : ''}`;
+  } else if (kind === 'military') {
+    title = p.name || 'Military installation';
+    const tier = MILITARY_TIER_COLORS[p.tier] || MILITARY_TIER_COLORS.major;
+    badge = `MILITARY · ${tier.label.toUpperCase()}`;
+    rows = `
+      ${p.kind ? `<span class="k">OSM tag</span><span class="v">military=${p.kind}</span>` : ''}
+      ${p.operator ? `<span class="k">Operator</span><span class="v">${p.operator}</span>` : ''}
+      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
+      ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
+  } else if (kind === 'corrections') {
+    title = p.name || 'Correctional facility';
+    const tier = CORRECTIONS_TIER_COLORS[p.tier] || CORRECTIONS_TIER_COLORS.standard;
+    badge = `CORRECTIONS · ${tier.label.toUpperCase()}`;
+    const loc = [p.city, p.region].filter(Boolean).join(', ');
+    rows = `
+      ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
+      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
+      ${p.type ? `<span class="k">Type</span><span class="v">${p.type}</span>` : ''}
+      ${p.security ? `<span class="k">Security</span><span class="v">${p.security}</span>` : ''}
+      ${p.population ? `<span class="k">Population</span><span class="v">${p.population.toLocaleString()}</span>` : ''}
+      ${p.capacity ? `<span class="k">Capacity</span><span class="v">${p.capacity.toLocaleString()}</span>` : ''}
+      ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
+  } else if (kind === 'school') {
+    title = p.name || 'School';
+    const tier = SCHOOL_TIER_COLORS[p.tier] || SCHOOL_TIER_COLORS.standard;
+    badge = `SCHOOL · ${tier.label.toUpperCase()}`;
+    const loc = [p.city, p.region].filter(Boolean).join(', ');
+    rows = `
+      ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
+      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
+      ${p.kind ? `<span class="k">Kind</span><span class="v">${p.kind}</span>` : ''}
+      ${p.grades ? `<span class="k">Grades</span><span class="v">${p.grades}</span>` : ''}
+      ${p.enrollment ? `<span class="k">Enrollment</span><span class="v">${p.enrollment.toLocaleString()}</span>` : ''}
+      ${p.housing && p.housing.toString().toUpperCase().startsWith('Y') ? `<span class="k">Housing</span><span class="v">Yes${p.dorm_cap ? ` (${p.dorm_cap.toLocaleString()} dorm)` : ''}</span>` : ''}
+      ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
+  } else if (kind === 'food') {
+    title = p.name || 'Food production';
+    const tier = FOOD_TIER_COLORS[p.tier] || FOOD_TIER_COLORS.standard;
+    badge = `FOOD PROD · ${tier.label.toUpperCase()}`;
+    const loc = [p.city, p.region].filter(Boolean).join(', ');
+    rows = `
+      ${p.address ? `<span class="k">Address</span><span class="v">${p.address}</span>` : ''}
+      ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
+      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
+      ${p.est_id ? `<span class="k">Est ID</span><span class="v">${p.est_id}</span>` : ''}
+      ${p.activities ? `<span class="k">Activities</span><span class="v">${p.activities}</span>` : ''}
+      ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
+  } else if (kind === 'ltc') {
+    title = p.name || 'Long-term care facility';
+    const tier = LTC_TIER_COLORS[p.tier] || LTC_TIER_COLORS.standard;
+    badge = `LTC · ${tier.label.toUpperCase()}`;
+    const loc = [p.city, p.region].filter(Boolean).join(', ');
+    rows = `
+      ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
+      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
+      ${p.facility ? `<span class="k">Type</span><span class="v">${p.facility}</span>` : ''}
+      ${p.population ? `<span class="k">Population</span><span class="v">${p.population.toLocaleString()}</span>` : ''}
+      ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
   } else {
     return null;
   }

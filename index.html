@@ -146,6 +146,111 @@
         are dropped — they aren't separate destinations.
       </div>
 
+      <div class="info-group">Pathogen-spread congregate-setting overlays</div>
+      <div class="info-row">
+        <b>Military installations</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>military=*</code>, named features only).
+        HIFLD MIRTA migrated off the public FEMA service, so OSM is the
+        unified source for US / CA / GL / IS.
+      </div>
+      <div class="info-row info-row--note">
+        Military tier (<span class="poi-tier-dot" style="background:#3F4D2F"></span>Base /
+        <span class="poi-tier-dot" style="background:#7A8450"></span>Guard/Reserve/Barracks /
+        <span class="poi-tier-dot" style="background:#B5C18E"></span>Range/Training)
+        derived from OSM <code>military</code> tag.
+      </div>
+      <div class="info-row">
+        <b>Correctional facilities (US)</b> —
+        <a href="https://hifld-geoplatform.opendata.arcgis.com/" target="_blank" rel="noopener">HIFLD Prison Points</a>
+        via FEMA-hosted ArcGIS service (federal, state, county, city, juvenile).
+      </div>
+      <div class="info-row">
+        <b>Correctional facilities (CA / GL / IS)</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>amenity=prison</code>, ODbL).
+      </div>
+      <div class="info-row info-row--note">
+        Corrections tier (<span class="poi-tier-dot" style="background:#2F3E46"></span>Federal/Military/Maximum /
+        <span class="poi-tier-dot" style="background:#52796F"></span>State/County/Medium /
+        <span class="poi-tier-dot" style="background:#84A98C"></span>Local/Jail/Juvenile)
+        derived from HIFLD <code>TYPE</code>+<code>SECURELVL</code>; OSM uses <code>operator</code>+<code>name</code>.
+      </div>
+      <div class="info-row">
+        <b>Schools (US)</b> —
+        <a href="https://hifld-geoplatform.opendata.arcgis.com/" target="_blank" rel="noopener">HIFLD Public Schools</a>,
+        <a href="https://hifld-geoplatform.opendata.arcgis.com/" target="_blank" rel="noopener">Private Schools</a>,
+        and <a href="https://hifld-geoplatform.opendata.arcgis.com/" target="_blank" rel="noopener">Colleges &amp; Universities</a>
+        (HIFLD wraps NCES CCD/PSS and IPEDS).
+      </div>
+      <div class="info-row">
+        <b>Schools (CA / GL / IS)</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>amenity=school|college|university</code>, ODbL).
+      </div>
+      <div class="info-row info-row--note">
+        School tier (<span class="poi-tier-dot" style="background:#5E2A84"></span>College/University /
+        <span class="poi-tier-dot" style="background:#8E6CB0"></span>K-12 enrollment ≥ 500 /
+        <span class="poi-tier-dot" style="background:#C4A7E0"></span>K-12 enrollment 100–499)
+        derived from HIFLD <code>ENROLLMENT</code>; schools below 100 are dropped.
+        OSM lacks enrollment counts so it tiers by education level only.
+      </div>
+      <div class="info-row">
+        <b>Food production (US)</b> —
+        <a href="https://www.fsis.usda.gov/inspection/establishments/meat-poultry-and-egg-product-inspection-directory"
+           target="_blank" rel="noopener">USDA FSIS Meat, Poultry &amp; Egg Product Inspection Directory</a>,
+        addresses geocoded via the
+        <a href="https://geocoding.geo.census.gov/geocoder/" target="_blank" rel="noopener">US Census Geocoder</a>.
+      </div>
+      <div class="info-row">
+        <b>Food production (CA / GL / IS)</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>industrial=slaughterhouse|meat|food|fish</code>, ODbL).
+        CFIA doesn't publish a bulk CSV of licensed establishments through
+        the Open Government portal, so OSM is the unified source for the
+        US's three foreign neighbours.
+      </div>
+      <div class="info-row info-row--note">
+        Food production tier (<span class="poi-tier-dot" style="background:#5C3317"></span>Slaughter /
+        <span class="poi-tier-dot" style="background:#8B5A2B"></span>Processing /
+        <span class="poi-tier-dot" style="background:#C68E5E"></span>Egg/Other)
+        derived from the FSIS / CFIA <code>activities</code> field.
+        Meatpacking slaughter floors were the strongest documented
+        congregate-outbreak driver of COVID-era food-industry transmission.
+      </div>
+      <div class="info-row">
+        <b>Long-term care (US)</b> —
+        <a href="https://hifld-geoplatform.opendata.arcgis.com/" target="_blank" rel="noopener">HIFLD Open Nursing Homes</a>
+        (wraps CMS Provider Information; includes nursing homes and assisted-living facilities).
+      </div>
+      <div class="info-row">
+        <b>Long-term care (CA)</b> —
+        <a href="https://www.statcan.gc.ca/en/lode/databases/odhf"
+           target="_blank" rel="noopener">StatCan ODHF v1.1</a>
+        (second pass, filtered to <code>long-term care</code> / <code>nursing</code> /
+        <code>palliative</code> facility types).
+      </div>
+      <div class="info-row">
+        <b>Long-term care (GL / IS)</b> —
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
+        via Overpass API (<code>amenity=nursing_home</code> + <code>social_facility=*</code>, ODbL).
+      </div>
+      <div class="info-row info-row--note">
+        Long-term care tier (<span class="poi-tier-dot" style="background:#9D2A4E"></span>Skilled Nursing /
+        <span class="poi-tier-dot" style="background:#C76B89"></span>Assisted Living /
+        <span class="poi-tier-dot" style="background:#E8B6C1"></span>Hospice/Adult Day)
+        reflects clinical acuity, which proxies outbreak case-fatality risk.
+      </div>
+
+      <div class="info-group">Sidecar (not rendered on map)</div>
+      <div class="info-row">
+        <b>Airport passenger-flow edges</b> —
+        <a href="https://www.transtats.bts.gov/Tables.asp?DB_ID=110&amp;DB_Name=Air%20Carrier%20Statistics"
+           target="_blank" rel="noopener">BTS T-100 Segment data</a>,
+        aggregated to airport-pair flows in <code>data/airport_edges.csv</code>
+        for downstream metapopulation modelling.
+      </div>
+
       <div class="info-footer">
         Point data clipped to scenario land polygons at fetch time
         (point-in-polygon test). Last refreshed when
@@ -213,7 +318,90 @@
         <span><span class="poi-tier-dot" style="background:#0071CE"></span>Discount</span>
         <span><span class="poi-tier-dot" style="background:#5DA9E9"></span>Neighborhood</span>
       </div>
-      <div class="poi-source">Sources: OurAirports, HIFLD &amp; StatCan ODHF, OpenStreetMap</div>
+
+      <!-- Pathogen-spread overlays (added 2026-05-19) — five congregate-
+           setting layers seeded for BoldQuest 26 TTX modelling. -->
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-military">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#3F4D2F"></span>
+          <span style="background:#7A8450"></span>
+          <span style="background:#B5C18E"></span>
+        </span>
+        Military installations
+        <span id="military-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#3F4D2F"></span>Base</span>
+        <span><span class="poi-tier-dot" style="background:#7A8450"></span>Guard/Reserve</span>
+        <span><span class="poi-tier-dot" style="background:#B5C18E"></span>Range/Training</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-corrections">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#2F3E46"></span>
+          <span style="background:#52796F"></span>
+          <span style="background:#84A98C"></span>
+        </span>
+        Correctional facilities
+        <span id="corrections-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#2F3E46"></span>Federal/Max</span>
+        <span><span class="poi-tier-dot" style="background:#52796F"></span>State/Med</span>
+        <span><span class="poi-tier-dot" style="background:#84A98C"></span>Local/Juv</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-schools">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#5E2A84"></span>
+          <span style="background:#8E6CB0"></span>
+          <span style="background:#C4A7E0"></span>
+        </span>
+        Schools
+        <span id="schools-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#5E2A84"></span>College/Univ</span>
+        <span><span class="poi-tier-dot" style="background:#8E6CB0"></span>K-12 ≥500</span>
+        <span><span class="poi-tier-dot" style="background:#C4A7E0"></span>K-12 100-499</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-food">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#5C3317"></span>
+          <span style="background:#8B5A2B"></span>
+          <span style="background:#C68E5E"></span>
+        </span>
+        Food production
+        <span id="food-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#5C3317"></span>Slaughter</span>
+        <span><span class="poi-tier-dot" style="background:#8B5A2B"></span>Processing</span>
+        <span><span class="poi-tier-dot" style="background:#C68E5E"></span>Egg/Other</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-ltc">
+        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
+          <span style="background:#9D2A4E"></span>
+          <span style="background:#C76B89"></span>
+          <span style="background:#E8B6C1"></span>
+        </span>
+        Long-term care
+        <span id="ltc-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#9D2A4E"></span>Nursing</span>
+        <span><span class="poi-tier-dot" style="background:#C76B89"></span>Assisted</span>
+        <span><span class="poi-tier-dot" style="background:#E8B6C1"></span>Hospice/Day</span>
+      </div>
+
+      <div class="poi-source">Sources: OurAirports, HIFLD, StatCan ODHF, CMS, USDA FSIS, CFIA, OpenStreetMap. See <b>i</b> panel for full attribution.</div>
     </div>
   </div>
 
