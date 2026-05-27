@@ -118,6 +118,18 @@ const map = new ol.Map({
   }),
 });
 
+// ----- Persisted UI / view state (localStorage) -----
+const MAP_STATE_KEY = 'bq26-webmap-state-v1';
+let _restoringMapState = false;
+let _saveMapStateTimer = null;
+let pendingSavedMapState = null;
+try {
+  const _rawState = localStorage.getItem(MAP_STATE_KEY);
+  if (_rawState) pendingSavedMapState = JSON.parse(_rawState);
+} catch (e) {
+  console.warn('[map-state] load failed:', e);
+}
+
 // ----- Build labels + fit view once polygons load -----
 countriesSource.once('featuresloadend', () => {
   // Drop the inline Ocean polygon — the dark map background is the "ocean"
@@ -201,7 +213,13 @@ countriesSource.once('featuresloadend', () => {
     extent: bufferedExt,
     showFullExtent: true,  // allow zoom levels that show the whole extent
   }));
-  map.getView().fit(ext, { padding: [40, 40, 40, 40] });
+  if (pendingSavedMapState?.view?.center
+      && pendingSavedMapState.view.zoom != null) {
+    map.getView().setCenter(pendingSavedMapState.view.center);
+    map.getView().setZoom(pendingSavedMapState.view.zoom);
+  } else {
+    map.getView().fit(ext, { padding: [40, 40, 40, 40] });
+  }
   buildLegend(countryFeatures);
 });
 
@@ -455,10 +473,14 @@ function stopMaster() {
 function anyLayerVisible() { return animatedLayers.some(al => al.layer.getVisible()); }
 
 // Wire master controls
-$('master-play').addEventListener('click', () => { if (masterPlaying) stopMaster(); else startMaster(); });
+$('master-play').addEventListener('click', () => {
+  if (masterPlaying) stopMaster(); else startMaster();
+  scheduleSaveMapState();
+});
 $('master-slider').addEventListener('input', (e) => {
   stopMaster();
   setMasterFrame(parseInt(e.target.value, 10));
+  scheduleSaveMapState();
 });
 
 // ----- Layer setup: registers a layer + toggle handler. No per-layer animation. -----
@@ -512,6 +534,7 @@ function setupAnimatedWmsLayer({ panelId, layerName, cadenceMin, opacity, zIndex
         $('master-controls').style.display = 'none';
       }
     }
+    scheduleSaveMapState();
   });
 }
 
@@ -800,19 +823,23 @@ const basemapLayers = {
 };
 
 // Radio handler — only one basemap visible at a time
+function applyBasemap(value, { skipSave = false } = {}) {
+  const radio = document.querySelector(`input[name="basemap"][value="${value}"]`);
+  if (radio) radio.checked = true;
+  for (const lyr of Object.values(basemapLayers)) lyr.setVisible(false);
+  if (value === 'none') {
+    basemapActive = false;
+  } else if (basemapLayers[value]) {
+    basemapLayers[value].setVisible(true);
+    basemapActive = true;
+  }
+  countriesLayer.changed();
+  if (!skipSave) scheduleSaveMapState();
+}
 document.querySelectorAll('input[name="basemap"]').forEach(radio => {
   radio.addEventListener('change', (e) => {
     if (!e.target.checked) return;
-    const value = e.target.value;
-    for (const lyr of Object.values(basemapLayers)) lyr.setVisible(false);
-    if (value === 'none') {
-      basemapActive = false;
-    } else {
-      basemapLayers[value].setVisible(true);
-      basemapActive = true;
-    }
-    // Force the country layer to re-evaluate styles (fill on/off)
-    countriesLayer.changed();
+    applyBasemap(e.target.value);
   });
 });
 
@@ -830,12 +857,14 @@ tintToggleEl.addEventListener('change', (e) => {
   countryTintActive = e.target.checked;
   tintSliderEl.disabled = !countryTintActive;
   countriesSource.changed();
+  scheduleSaveMapState();
 });
 tintSliderEl.addEventListener('input', (e) => {
   const pct = Number(e.target.value);
   countryTintAlpha = pct / 100;
   tintValueEl.textContent = String(pct);
   if (countryTintActive) countriesSource.changed();
+  scheduleSaveMapState();
 });
 
 // =============================================================
@@ -933,6 +962,7 @@ function placeRangeRings(coord) {
   // Reveal the Clear affordance now that rings exist. The help blurb is now
   // a separate (i)-button toggle, so placing rings no longer hides it.
   rangeClear.hidden = false;
+  scheduleSaveMapState();
 }
 
 // Bottom-left tool widget. Range Rings toggle drives the click-to-place
@@ -944,7 +974,7 @@ const rangeClear = document.getElementById('range-tool-clear');
 const rangeHint  = document.getElementById('range-tool-hint');
 const rangeInfo  = document.getElementById('range-tool-info');
 
-function setRangeToolActive(active) {
+function setRangeToolActive(active, { skipSave = false } = {}) {
   rangeToolActive = active;
   rangeBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
   // Crosshair cursor signals the click-to-place mode is live.
@@ -953,12 +983,14 @@ function setRangeToolActive(active) {
     clearRangeRings();
     rangeClear.hidden = true;
   }
+  if (!skipSave) scheduleSaveMapState();
 }
 
 rangeBtn.addEventListener('click', () => setRangeToolActive(!rangeToolActive));
 rangeClear.addEventListener('click', () => {
   clearRangeRings();
   rangeClear.hidden = true;
+  scheduleSaveMapState();
 });
 rangeInfo.addEventListener('click', () => {
   const showing = !rangeHint.hasAttribute('hidden');
@@ -1067,9 +1099,23 @@ const WALMART_TIER_STYLES = Object.fromEntries(
     [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'W', glyphFill: c.glyphFill })])
 );
 
-// Military installations — olive gradient. Major = active-duty base,
-// Standard = guard/reserve/barracks, Limited = range/training area.
-// Star glyph (★) is universally military-coded; renders well at 9 px.
+// Major installations vs other military sites — map toggles filter on OSM
+// `kind`, not just tier color. Offices/recruiting stations are excluded from
+// the major toggle even when mis-tagged in older GeoJSON builds.
+const MIL_MAJOR_KINDS = new Set([
+  'base', 'naval_base', 'airfield', 'garrison', 'naval', 'navy',
+]);
+function isMajorMilitaryProps(props) {
+  return MIL_MAJOR_KINDS.has((props.kind || '').toLowerCase());
+}
+function isMajorMilitaryFeature(feature) {
+  return feature.get('_poiKind') === 'military' && isMajorMilitaryProps(feature.getProperties());
+}
+function militaryFeatureVisible(feature) {
+  if (feature.get('_poiKind') !== 'military') return true;
+  return (isMajorMilitaryFeature(feature) && poiEnabled.militaryMajor)
+      || (!isMajorMilitaryFeature(feature) && poiEnabled.militaryOther);
+}
 const MILITARY_TIER_COLORS = {
   major:    { fill: '#3F4D2F', stroke: '#1F2818', label: 'Base'             },
   standard: { fill: '#7A8450', stroke: '#3A4220', label: 'Guard / Reserve'  },
@@ -1135,7 +1181,8 @@ const LTC_TIER_STYLES = Object.fromEntries(
 // these flags and call clusterSource.refresh() to re-cluster from scratch.
 const poiEnabled = {
   airport: false, hospital: false, walmart: false,
-  military: false, corrections: false, school: false, food: false, ltc: false,
+  militaryMajor: false, militaryOther: false,
+  corrections: false, school: false, food: false, ltc: false,
 };
 
 // One-stop style resolver for single POI features (called when a cluster
@@ -1234,11 +1281,24 @@ for (const cfg of POI_KINDS) {
       const feats = _poiGeoJsonFormat.readFeatures(gj);
       for (const f of feats) f.set('_poiKind', cfg.kind);
       poiCombinedSource.addFeatures(feats);
-      const countEl = document.getElementById(cfg.panelId + '-count');
-      if (countEl) countEl.textContent = `(${feats.length.toLocaleString()})`;
+      if (cfg.kind === 'military') {
+        const majorN = feats.filter((f) => isMajorMilitaryFeature(f)).length;
+        const otherN = feats.length - majorN;
+        const majorEl = document.getElementById('military-major-count');
+        const otherEl = document.getElementById('military-other-count');
+        if (majorEl) majorEl.textContent = `(${majorN.toLocaleString()})`;
+        if (otherEl) otherEl.textContent = `(${otherN.toLocaleString()})`;
+      } else {
+        const countEl = document.getElementById(cfg.panelId + '-count');
+        if (countEl) countEl.textContent = `(${feats.length.toLocaleString()})`;
+      }
       // If the user flipped this kind's toggle on before its data finished
       // loading, kick the cluster source so it picks the new features up.
-      if (poiEnabled[cfg.kind]) poiClusterSource.refresh();
+      if (cfg.kind === 'military'
+          ? (poiEnabled.militaryMajor || poiEnabled.militaryOther)
+          : poiEnabled[cfg.kind]) {
+        poiClusterSource.refresh();
+      }
     })
     .catch((err) => {
       console.warn(`[poi:${cfg.kind}] load failed:`, err);
@@ -1257,7 +1317,12 @@ const poiClusterSource = new ol.source.Cluster({
   distance: 40,
   minDistance: 20,
   geometryFunction: (feature) => {
-    if (!poiEnabled[feature.get('_poiKind')]) return null;
+    const kind = feature.get('_poiKind');
+    if (kind === 'military') {
+      if (!militaryFeatureVisible(feature)) return null;
+    } else if (!poiEnabled[kind]) {
+      return null;
+    }
     return feature.getGeometry();
   },
 });
@@ -1285,16 +1350,40 @@ map.addLayer(poiClusterLayer);
 // (refresh() re-runs the geometryFunction over every feature).
 function anyPoiEnabled() {
   return poiEnabled.airport || poiEnabled.hospital || poiEnabled.walmart
-      || poiEnabled.military || poiEnabled.corrections || poiEnabled.school
+      || poiEnabled.militaryMajor || poiEnabled.militaryOther
+      || poiEnabled.corrections || poiEnabled.school
       || poiEnabled.food || poiEnabled.ltc;
 }
-for (const cfg of POI_KINDS) {
+
+function setPoiToggle(key, panelId, checked, { skipSave = false } = {}) {
+  poiEnabled[key] = checked;
+  const el = document.getElementById('toggle-' + panelId);
+  if (el) el.checked = checked;
+  poiClusterLayer.setVisible(anyPoiEnabled());
+  poiClusterSource.refresh();
+  if (!skipSave) scheduleSaveMapState();
+}
+
+const POI_TOGGLE_SPECS = [
+  { key: 'airport',     panelId: 'airports' },
+  { key: 'hospital',    panelId: 'hospitals' },
+  { key: 'walmart',     panelId: 'walmarts' },
+  { key: 'corrections', panelId: 'corrections' },
+  { key: 'school',      panelId: 'schools' },
+  { key: 'food',        panelId: 'food' },
+  { key: 'ltc',         panelId: 'ltc' },
+];
+for (const cfg of POI_TOGGLE_SPECS) {
   document.getElementById('toggle-' + cfg.panelId).addEventListener('change', (e) => {
-    poiEnabled[cfg.kind] = e.target.checked;
-    poiClusterLayer.setVisible(anyPoiEnabled());
-    poiClusterSource.refresh();
+    setPoiToggle(cfg.key, cfg.panelId, e.target.checked);
   });
 }
+document.getElementById('toggle-military-major').addEventListener('change', (e) => {
+  setPoiToggle('militaryMajor', 'military-major', e.target.checked);
+});
+document.getElementById('toggle-military-other').addEventListener('change', (e) => {
+  setPoiToggle('militaryOther', 'military-other', e.target.checked);
+});
 
 // Extend the existing click handler so a click on a POI shows its popup.
 // We register a NEW click listener (the country handler in §click popup
@@ -1549,3 +1638,151 @@ document.addEventListener('keydown', (e) => {
     layersToggle.focus();
   }
 });
+
+// =============================================================
+// Persist / restore map UI state across page reloads
+// =============================================================
+function scheduleSaveMapState() {
+  if (_restoringMapState) return;
+  clearTimeout(_saveMapStateTimer);
+  _saveMapStateTimer = setTimeout(saveMapState, 250);
+}
+
+function saveMapState() {
+  const view = map.getView();
+  const center = view.getCenter();
+  let rangeCenter = null;
+  for (const f of rangeSource.getFeatures()) {
+    if (f.get('rangeType') === 'center') {
+      rangeCenter = f.getGeometry().getCoordinates().slice();
+      break;
+    }
+  }
+  const state = {
+    view: center ? { center: center.slice(), zoom: view.getZoom() } : null,
+    basemap: document.querySelector('input[name="basemap"]:checked')?.value || 'none',
+    countryTint: countryTintActive,
+    countryTintPct: Math.round(countryTintAlpha * 100),
+    radar: $('toggle-radar').checked,
+    cloud: $('toggle-cloud').checked,
+    masterFrame,
+    masterPlaying,
+    poi: { ...poiEnabled },
+    rangeTool: rangeToolActive,
+    rangeCenter,
+  };
+  try {
+    localStorage.setItem(MAP_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn('[map-state] save failed:', e);
+  }
+}
+
+function setWeatherLayer(panelId, on, { skipSave = false } = {}) {
+  const al = animatedLayers.find((x) => x.panelId === panelId);
+  if (!al) return;
+  const el = $('toggle-' + panelId);
+  if (el) el.checked = on;
+  if (on) {
+    al.layer.setVisible(true);
+    al.lastTime = null;
+    $('master-controls').style.display = '';
+    applyMasterFrame();
+    if (!masterPlaying) startMaster();
+  } else {
+    al.layer.setVisible(false);
+    $(panelId + '-loading').classList.remove('on');
+    if (!anyLayerVisible()) {
+      stopMaster();
+      $('master-controls').style.display = 'none';
+    }
+  }
+  if (!skipSave) scheduleSaveMapState();
+}
+
+function restoreMapState(state) {
+  if (!state) return;
+  _restoringMapState = true;
+  try {
+    applyBasemap(state.basemap || 'none', { skipSave: true });
+    tintToggleEl.checked = !!state.countryTint;
+    countryTintActive = !!state.countryTint;
+    tintSliderEl.disabled = !countryTintActive;
+    const pct = state.countryTintPct ?? 40;
+    tintSliderEl.value = String(pct);
+    countryTintAlpha = pct / 100;
+    tintValueEl.textContent = String(pct);
+    countriesSource.changed();
+
+    setWeatherLayer('radar', !!state.radar, { skipSave: true });
+    setWeatherLayer('cloud', !!state.cloud, { skipSave: true });
+    if (typeof state.masterFrame === 'number') {
+      masterFrame = Math.max(0, Math.min(MASTER_FRAMES - 1, state.masterFrame));
+      applyMasterFrame();
+    }
+    if (state.masterPlaying && anyLayerVisible()) startMaster();
+    else stopMaster();
+
+    for (const cfg of POI_TOGGLE_SPECS) {
+      setPoiToggle(cfg.key, cfg.panelId, !!state.poi?.[cfg.key], { skipSave: true });
+    }
+    setPoiToggle('militaryMajor', 'military-major', !!state.poi?.militaryMajor, { skipSave: true });
+    setPoiToggle('militaryOther', 'military-other', !!state.poi?.militaryOther, { skipSave: true });
+
+    if (state.rangeCenter) {
+      placeRangeRings(state.rangeCenter);
+      rangeClear.hidden = false;
+    }
+    rangeToolActive = !!state.rangeTool;
+    rangeBtn.setAttribute('aria-pressed', state.rangeTool ? 'true' : 'false');
+    map.getTargetElement().style.cursor = state.rangeTool ? 'crosshair' : '';
+  } finally {
+    _restoringMapState = false;
+  }
+}
+
+function resetMapToDefaults() {
+  _restoringMapState = true;
+  try {
+    localStorage.removeItem(MAP_STATE_KEY);
+    pendingSavedMapState = null;
+
+    applyBasemap('none', { skipSave: true });
+    tintToggleEl.checked = false;
+    countryTintActive = false;
+    tintSliderEl.disabled = true;
+    tintSliderEl.value = '40';
+    countryTintAlpha = 0.40;
+    tintValueEl.textContent = '40';
+    countriesSource.changed();
+
+    setWeatherLayer('radar', false, { skipSave: true });
+    setWeatherLayer('cloud', false, { skipSave: true });
+    stopMaster();
+    masterFrame = MASTER_FRAMES - 1;
+    applyMasterFrame();
+
+    for (const cfg of POI_TOGGLE_SPECS) {
+      setPoiToggle(cfg.key, cfg.panelId, false, { skipSave: true });
+    }
+    setPoiToggle('militaryMajor', 'military-major', false, { skipSave: true });
+    setPoiToggle('militaryOther', 'military-other', false, { skipSave: true });
+
+    setRangeToolActive(false, { skipSave: true });
+    popupEl.style.display = 'none';
+
+    const ext = countriesSource.getExtent();
+    if (ext && isFinite(ext[0])) {
+      map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 300 });
+    }
+  } finally {
+    _restoringMapState = false;
+  }
+}
+
+document.getElementById('reset-map-btn').addEventListener('click', () => {
+  resetMapToDefaults();
+});
+
+map.getView().on(['change:center', 'change:resolution'], scheduleSaveMapState);
+restoreMapState(pendingSavedMapState);

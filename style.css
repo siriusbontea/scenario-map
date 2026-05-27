@@ -189,6 +189,9 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
   font-size: 10px; color: #555;
   line-height: 1.5;
 }
+.poi-tier-key--note {
+  display: block; max-width: 240px; line-height: 1.35; color: #666;
+}
 .poi-tier-key > span { display: inline-flex; align-items: center; gap: 4px; }
 .poi-tier-dot {
   display: inline-block; width: 10px; height: 10px;
@@ -224,6 +227,14 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
   border: none; border-top: 1px solid #eee;
   margin: 10px -12px 8px;  /* negative margin so it spans full panel width */
 }
+.reset-map-btn {
+  display: block; width: 100%; margin-top: 4px;
+  font-size: 11px; padding: 6px 10px;
+  border: 1px solid rgba(0,0,0,0.15); border-radius: 4px;
+  background: #fff; cursor: pointer; color: #444;
+  text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+}
+.reset-map-btn:hover { background: #f4f4f4; }
 .weather-panel h4 + .weather-toggle { margin-top: 0; }
 
 .anim-controls {

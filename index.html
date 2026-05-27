@@ -155,10 +155,14 @@
         unified source for US / CA / GL / IS.
       </div>
       <div class="info-row info-row--note">
-        Military tier (<span class="poi-tier-dot" style="background:#3F4D2F"></span>Base /
-        <span class="poi-tier-dot" style="background:#7A8450"></span>Guard/Reserve/Barracks /
+        Military map toggles split <b>major installations</b> (OSM
+        <code>base</code> / <code>naval_base</code> / <code>airfield</code> /
+        <code>garrison</code>) from <b>other military sites</b> (offices,
+        recruiting stations, armoury, ranges, training areas). Marker color
+        (<span class="poi-tier-dot" style="background:#3F4D2F"></span>Base /
+        <span class="poi-tier-dot" style="background:#7A8450"></span>Guard/Reserve /
         <span class="poi-tier-dot" style="background:#B5C18E"></span>Range/Training)
-        derived from OSM <code>military</code> tag.
+        still reflects OSM <code>military</code> tag tier.
       </div>
       <div class="info-row">
         <b>Correctional facilities (US)</b> —
@@ -322,18 +326,26 @@
       <!-- Pathogen-spread overlays (added 2026-05-19) — five congregate-
            setting layers seeded for BoldQuest 26 TTX modelling. -->
       <label class="weather-toggle">
-        <input type="checkbox" id="toggle-military">
+        <input type="checkbox" id="toggle-military-major">
+        <span class="poi-swatch" style="background:#3F4D2F;border-color:#1F2818" aria-hidden="true"></span>
+        Major military installations
+        <span id="military-major-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key poi-tier-key--note">
+        Bases, naval stations, airfields, garrisons — excludes offices and recruiting stations.
+      </div>
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-military-other">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#3F4D2F"></span>
           <span style="background:#7A8450"></span>
           <span style="background:#B5C18E"></span>
+          <span style="background:#7A8450"></span>
         </span>
-        Military installations
-        <span id="military-count" class="poi-count"></span>
+        Other military sites
+        <span id="military-other-count" class="poi-count"></span>
       </label>
       <div class="poi-tier-key">
-        <span><span class="poi-tier-dot" style="background:#3F4D2F"></span>Base</span>
-        <span><span class="poi-tier-dot" style="background:#7A8450"></span>Guard/Reserve</span>
+        <span><span class="poi-tier-dot" style="background:#7A8450"></span>Offices/Guard</span>
         <span><span class="poi-tier-dot" style="background:#B5C18E"></span>Range/Training</span>
       </div>
 
@@ -461,6 +473,13 @@
       <div class="anim-time" id="master-time">--:--Z</div>
       <div class="anim-source">Synced timeline · Environment Canada GeoMet</div>
     </div>
+
+    <hr />
+
+    <button type="button" id="reset-map-btn" class="reset-map-btn"
+            title="Clear saved layers, overlays, and view — return to defaults">
+      Reset map
+    </button>
     </div>
   </div>
 
