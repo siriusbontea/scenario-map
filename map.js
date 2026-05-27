@@ -123,11 +123,36 @@ const MAP_STATE_KEY = 'bq26-webmap-state-v1';
 let _restoringMapState = false;
 let _saveMapStateTimer = null;
 let pendingSavedMapState = null;
+let _suppressViewSave = false;
+let _viewPersistenceBound = false;
 try {
   const _rawState = localStorage.getItem(MAP_STATE_KEY);
   if (_rawState) pendingSavedMapState = JSON.parse(_rawState);
 } catch (e) {
   console.warn('[map-state] load failed:', e);
+}
+
+function applySavedView(viewState) {
+  if (!viewState?.center || viewState.zoom == null) return false;
+  const view = map.getView();
+  _suppressViewSave = true;
+  try {
+    view.setCenter(viewState.center);
+    if (viewState.resolution != null) {
+      view.setResolution(viewState.resolution);
+    } else {
+      view.setZoom(viewState.zoom);
+    }
+  } finally {
+    _suppressViewSave = false;
+  }
+  return true;
+}
+
+function bindViewPersistence() {
+  if (_viewPersistenceBound) return;
+  _viewPersistenceBound = true;
+  map.getView().on(['change:center', 'change:resolution'], scheduleSaveMapState);
 }
 
 // ----- Build labels + fit view once polygons load -----
@@ -208,18 +233,22 @@ countriesSource.once('featuresloadend', () => {
     ext[0] - PAN_BUFFER_M, ext[1] - PAN_BUFFER_M,
     ext[2] + PAN_BUFFER_M, ext[3] + PAN_BUFFER_M,
   ];
-  map.setView(new ol.View({
-    projection: 'EPSG:3978',
+  // Update pan constraints on the existing view — do NOT replace the view
+  // object. setView() would discard center/zoom and detach persistence listeners.
+  const view = map.getView();
+  view.setProperties({
     extent: bufferedExt,
-    showFullExtent: true,  // allow zoom levels that show the whole extent
-  }));
-  if (pendingSavedMapState?.view?.center
-      && pendingSavedMapState.view.zoom != null) {
-    map.getView().setCenter(pendingSavedMapState.view.center);
-    map.getView().setZoom(pendingSavedMapState.view.zoom);
-  } else {
-    map.getView().fit(ext, { padding: [40, 40, 40, 40] });
+    showFullExtent: true,
+  });
+  _suppressViewSave = true;
+  try {
+    if (!applySavedView(pendingSavedMapState?.view)) {
+      view.fit(ext, { padding: [40, 40, 40, 40] });
+    }
+  } finally {
+    _suppressViewSave = false;
   }
+  bindViewPersistence();
   buildLegend(countryFeatures);
 });
 
@@ -1712,7 +1741,7 @@ document.addEventListener('keydown', (e) => {
 // Persist / restore map UI state across page reloads
 // =============================================================
 function scheduleSaveMapState() {
-  if (_restoringMapState) return;
+  if (_restoringMapState || _suppressViewSave) return;
   clearTimeout(_saveMapStateTimer);
   _saveMapStateTimer = setTimeout(saveMapState, 250);
 }
@@ -1720,6 +1749,8 @@ function scheduleSaveMapState() {
 function saveMapState() {
   const view = map.getView();
   const center = view.getCenter();
+  const zoom = view.getZoom();
+  const resolution = view.getResolution();
   let rangeCenter = null;
   for (const f of rangeSource.getFeatures()) {
     if (f.get('rangeType') === 'center') {
@@ -1728,7 +1759,11 @@ function saveMapState() {
     }
   }
   const state = {
-    view: center ? { center: center.slice(), zoom: view.getZoom() } : null,
+    view: (center && zoom != null) ? {
+      center: center.slice(),
+      zoom,
+      resolution: resolution ?? undefined,
+    } : null,
     basemap: document.querySelector('input[name="basemap"]:checked')?.value || 'none',
     countryTint: countryTintActive,
     countryTintPct: Math.round(countryTintAlpha * 100),
@@ -1856,9 +1891,14 @@ function resetMapToDefaults() {
     setRangeToolActive(false, { skipSave: true });
     popupEl.style.display = 'none';
 
-    const ext = countriesSource.getExtent();
-    if (ext && isFinite(ext[0])) {
-      map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 300 });
+    _suppressViewSave = true;
+    try {
+      const ext = countriesSource.getExtent();
+      if (ext && isFinite(ext[0])) {
+        map.getView().fit(ext, { padding: [40, 40, 40, 40], duration: 300 });
+      }
+    } finally {
+      _suppressViewSave = false;
     }
   } finally {
     _restoringMapState = false;
@@ -1869,5 +1909,4 @@ document.getElementById('reset-map-btn').addEventListener('click', () => {
   resetMapToDefaults();
 });
 
-map.getView().on(['change:center', 'change:resolution'], scheduleSaveMapState);
 restoreMapState(pendingSavedMapState);

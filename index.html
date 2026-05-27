@@ -282,10 +282,13 @@
       <h4>Point Overlays</h4>
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-airports">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#023E8A;color:#fff">✈</span>
-          <span class="poi-swatch-seg" style="background:#0077B6;color:#fff">✈</span>
-          <span class="poi-swatch-seg" style="background:#00B4D8;color:#fff">✈</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#023E8A"></span>
+            <span class="poi-swatch-seg" style="background:#0077B6"></span>
+            <span class="poi-swatch-seg" style="background:#00B4D8"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">✈</span>
         </span>
         Military-capable airfields
         <span id="airports-count" class="poi-count"></span>
@@ -297,7 +300,10 @@
       </div>
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-hospital-major">
-        <span class="poi-swatch poi-swatch--emphasis" style="background:#B11226;border-color:#4a0000;color:#fff;--poi-ring:#4a0000" aria-hidden="true">H</span>
+        <span class="poi-swatch-stack poi-swatch--map" style="--poi-fill:#B11226;--poi-stroke:#4a0000;--poi-ring:#4a0000" aria-hidden="true">
+          <span class="poi-swatch-ring"></span>
+          <span class="poi-swatch-disc"><span class="poi-swatch-glyph" style="color:#fff">H</span></span>
+        </span>
         Major hospitals
         <span id="hospital-major-count" class="poi-count"></span>
       </label>
@@ -306,9 +312,12 @@
       </div>
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-hospital-other">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#E07B00;color:#fff">H</span>
-          <span class="poi-swatch-seg" style="background:#E8A87C;color:#fff">H</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#E07B00"></span>
+            <span class="poi-swatch-seg" style="background:#E8A87C"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">H</span>
         </span>
         Other hospitals
         <span id="hospital-other-count" class="poi-count"></span>
@@ -319,10 +328,13 @@
       </div>
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-walmarts">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#FFC220;color:#0071CE">W</span>
-          <span class="poi-swatch-seg" style="background:#0071CE;color:#FFC220">W</span>
-          <span class="poi-swatch-seg" style="background:#5DA9E9;color:#fff">W</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#FFC220"></span>
+            <span class="poi-swatch-seg" style="background:#0071CE"></span>
+            <span class="poi-swatch-seg" style="background:#5DA9E9"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#0071CE">W</span>
         </span>
         Walmart stores
         <span id="walmarts-count" class="poi-count"></span>
@@ -337,7 +349,10 @@
            setting layers seeded for BoldQuest 26 TTX modelling. -->
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-military-major">
-        <span class="poi-swatch poi-swatch--emphasis" style="background:#3F4D2F;border-color:#1F2818;color:#fff;--poi-ring:#1F2818" aria-hidden="true">★</span>
+        <span class="poi-swatch-stack poi-swatch--map" style="--poi-fill:#3F4D2F;--poi-stroke:#1F2818;--poi-ring:#1F2818" aria-hidden="true">
+          <span class="poi-swatch-ring"></span>
+          <span class="poi-swatch-disc"><span class="poi-swatch-glyph" style="color:#fff">★</span></span>
+        </span>
         Major military installations
         <span id="military-major-count" class="poi-count"></span>
       </label>
@@ -346,9 +361,12 @@
       </div>
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-military-other">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#7A8450;color:#fff">★</span>
-          <span class="poi-swatch-seg" style="background:#B5C18E;color:#fff">★</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#7A8450"></span>
+            <span class="poi-swatch-seg" style="background:#B5C18E"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">★</span>
         </span>
         Other military sites
         <span id="military-other-count" class="poi-count"></span>
@@ -360,10 +378,13 @@
 
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-corrections">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#2F3E46;color:#fff">P</span>
-          <span class="poi-swatch-seg" style="background:#52796F;color:#fff">P</span>
-          <span class="poi-swatch-seg" style="background:#84A98C;color:#fff">P</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#2F3E46"></span>
+            <span class="poi-swatch-seg" style="background:#52796F"></span>
+            <span class="poi-swatch-seg" style="background:#84A98C"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">P</span>
         </span>
         Correctional facilities
         <span id="corrections-count" class="poi-count"></span>
@@ -376,10 +397,13 @@
 
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-schools">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#5E2A84;color:#fff">S</span>
-          <span class="poi-swatch-seg" style="background:#8E6CB0;color:#fff">S</span>
-          <span class="poi-swatch-seg" style="background:#C4A7E0;color:#fff">S</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#5E2A84"></span>
+            <span class="poi-swatch-seg" style="background:#8E6CB0"></span>
+            <span class="poi-swatch-seg" style="background:#C4A7E0"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">S</span>
         </span>
         Schools
         <span id="schools-count" class="poi-count"></span>
@@ -392,10 +416,13 @@
 
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-food">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#5C3317;color:#fff">F</span>
-          <span class="poi-swatch-seg" style="background:#8B5A2B;color:#fff">F</span>
-          <span class="poi-swatch-seg" style="background:#C68E5E;color:#fff">F</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#5C3317"></span>
+            <span class="poi-swatch-seg" style="background:#8B5A2B"></span>
+            <span class="poi-swatch-seg" style="background:#C68E5E"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">F</span>
         </span>
         Food production
         <span id="food-count" class="poi-count"></span>
@@ -408,10 +435,13 @@
 
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-ltc">
-        <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span class="poi-swatch-seg" style="background:#9D2A4E;color:#fff">L</span>
-          <span class="poi-swatch-seg" style="background:#C76B89;color:#fff">L</span>
-          <span class="poi-swatch-seg" style="background:#E8B6C1;color:#fff">L</span>
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#9D2A4E"></span>
+            <span class="poi-swatch-seg" style="background:#C76B89"></span>
+            <span class="poi-swatch-seg" style="background:#E8B6C1"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">L</span>
         </span>
         Long-term care
         <span id="ltc-count" class="poi-count"></span>
