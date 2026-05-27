@@ -397,6 +397,35 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
 .range-tool-clear:hover { background: #f4f4f4; }
 .range-tool-clear[hidden],
 .range-tool-hint[hidden] { display: none; }
+.range-tool-preset {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  width: 100%;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.96);
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  font-size: 10px;
+  color: #444;
+}
+.range-tool-preset-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #666;
+}
+.range-preset-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.range-preset-opt input { margin: 0; vertical-align: middle; }
 .range-tool-hint {
   width: 100%;  /* breaks onto its own line below the buttons */
   background: rgba(20, 30, 48, 0.92); color: #fff;

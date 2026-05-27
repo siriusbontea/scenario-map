@@ -557,10 +557,21 @@
       </button>
       <button class="range-tool-clear" id="range-tool-clear" type="button"
               title="Clear placed rings" aria-label="Clear rings" hidden>Clear</button>
+      <div class="range-tool-preset" id="range-tool-preset">
+        <span class="range-tool-preset-label">Preset</span>
+        <label class="range-preset-opt">
+          <input type="radio" name="range-preset" value="long" checked>
+          Long (1000 km)
+        </label>
+        <label class="range-preset-opt">
+          <input type="radio" name="range-preset" value="short">
+          Short (250 km)
+        </label>
+      </div>
       <div class="range-tool-hint" id="range-tool-hint" hidden>
-        Drops concentric rings at <b>250 / 500 / 750 / 1000 km</b> from the click point.
+        <span id="range-tool-hint-text">Drops concentric rings at <b>250 / 500 / 750 / 1000 km</b> from the click point.
         Toggle <b>Range Rings</b> on, click the map to place; click again to relocate.
-        Use <b>Clear</b> to remove them.
+        Use <b>Clear</b> to remove them.</span>
       </div>
     </div>
   </div>

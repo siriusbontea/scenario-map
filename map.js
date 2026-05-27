@@ -899,16 +899,34 @@ tintSliderEl.addEventListener('input', (e) => {
 // =============================================================
 // Range rings overlay — toggleable click-to-place
 // =============================================================
-// Concentric rings at 250 / 500 / 750 / 1000 km from the click point,
-// each labeled with its radius. Rings are GEODESIC: every vertex is the
-// click point offset by the target distance along a great circle, then
-// projected into EPSG:3978. This matches OL's ScaleLine (also geodesic),
-// so the 250 km ring aligns with the scale bar at 250 km. In LCC the
-// projected outline appears slightly egg-shaped at high latitudes —
-// that is correct, because a true geodesic circle on the ellipsoid
-// projects non-circularly outside the standard parallels.
-const RANGE_RADII_M = [250_000, 500_000, 750_000, 1_000_000];
+// Concentric geodesic rings from the click point; preset selects radii.
+// Long: 250 / 500 / 750 / 1000 km. Short: 50 / 100 / 150 / 200 / 250 km.
+// Rings are GEODESIC: every vertex is the click point offset by the target
+// distance along a great circle, then projected into EPSG:3978.
+const RANGE_PRESETS = {
+  long:  { radiiM: [250_000, 500_000, 750_000, 1_000_000], maxKm: 1000 },
+  short: { radiiM: [50_000, 100_000, 150_000, 200_000, 250_000], maxKm: 250 },
+};
+let rangePreset = 'long';
+let rangeLastCenter = null;
 const RANGE_RING_STEPS = 256;  // vertices per ring; 256 is visually smooth
+
+function getRangeRadiiM() {
+  return RANGE_PRESETS[rangePreset]?.radiiM || RANGE_PRESETS.long.radiiM;
+}
+
+function formatRangeLabel(rM) {
+  const km = rM / 1000;
+  return Number.isInteger(km) ? `${km} km` : `${km.toFixed(1)} km`;
+}
+
+function rangePresetHintHtml() {
+  const radii = getRangeRadiiM().map(formatRangeLabel).join(' / ');
+  const max = RANGE_PRESETS[rangePreset]?.maxKm || 1000;
+  return `Drops concentric rings at <b>${radii}</b> from the click point (max <b>${max} km</b>). `
+    + 'Toggle <b>Range Rings</b> on, click the map to place; click again to relocate. '
+    + 'Use <b>Clear</b> to remove them.';
+}
 
 const rangeSource = new ol.source.Vector();
 const rangeLayer = new ol.layer.Vector({
@@ -950,9 +968,11 @@ map.addLayer(rangeLayer);
 
 function clearRangeRings() {
   rangeSource.clear();
+  rangeLastCenter = null;
 }
 
 function placeRangeRings(coord) {
+  rangeLastCenter = coord.slice();
   rangeSource.clear();
   // Center dot
   const center = new ol.Feature({ geometry: new ol.geom.Point(coord) });
@@ -962,7 +982,7 @@ function placeRangeRings(coord) {
   // Compute click point in lon/lat for geodesic offsets along the sphere.
   const centerLL = ol.proj.toLonLat(coord, 'EPSG:3978');
 
-  for (const r of RANGE_RADII_M) {
+  for (const r of getRangeRadiiM()) {
     // Build the ring by walking 0..2π in bearing, offsetting r meters
     // along a great circle, and projecting each vertex back to EPSG:3978.
     const ringCoords = new Array(RANGE_RING_STEPS + 1);
@@ -985,7 +1005,7 @@ function placeRangeRings(coord) {
       geometry: new ol.geom.Point(labelCoord),
     });
     label.set('rangeType', 'label');
-    label.set('text', `${r / 1000} km`);
+    label.set('text', formatRangeLabel(r));
     rangeSource.addFeature(label);
   }
   // Reveal the Clear affordance now that rings exist. The help blurb is now
@@ -1001,7 +1021,18 @@ function placeRangeRings(coord) {
 const rangeBtn   = document.getElementById('range-tool-btn');
 const rangeClear = document.getElementById('range-tool-clear');
 const rangeHint  = document.getElementById('range-tool-hint');
+const rangeHintText = document.getElementById('range-tool-hint-text');
 const rangeInfo  = document.getElementById('range-tool-info');
+
+function setRangePreset(value, { skipSave = false } = {}) {
+  if (!RANGE_PRESETS[value]) return;
+  rangePreset = value;
+  const radio = document.querySelector(`input[name="range-preset"][value="${value}"]`);
+  if (radio) radio.checked = true;
+  if (rangeHintText) rangeHintText.innerHTML = rangePresetHintHtml();
+  if (rangeLastCenter) placeRangeRings(rangeLastCenter);
+  if (!skipSave) scheduleSaveMapState();
+}
 
 function setRangeToolActive(active, { skipSave = false } = {}) {
   rangeToolActive = active;
@@ -1027,6 +1058,13 @@ rangeInfo.addEventListener('click', () => {
   else rangeHint.removeAttribute('hidden');
   rangeInfo.setAttribute('aria-pressed', showing ? 'false' : 'true');
 });
+document.querySelectorAll('input[name="range-preset"]').forEach((radio) => {
+  radio.addEventListener('change', (e) => {
+    if (!e.target.checked) return;
+    setRangePreset(e.target.value);
+  });
+});
+if (rangeHintText) rangeHintText.innerHTML = rangePresetHintHtml();
 
 // =============================================================
 // POI overlays — airports, hospitals, Walmart stores
@@ -1773,6 +1811,7 @@ function saveMapState() {
     masterPlaying,
     poi: { ...poiEnabled },
     rangeTool: rangeToolActive,
+    rangePreset,
     rangeCenter,
   };
   try {
@@ -1847,6 +1886,9 @@ function restoreMapState(state) {
     setPoiToggle('militaryMajor', 'military-major', !!state.poi?.militaryMajor, { skipSave: true });
     setPoiToggle('militaryOther', 'military-other', !!state.poi?.militaryOther, { skipSave: true });
 
+    if (state.rangePreset && RANGE_PRESETS[state.rangePreset]) {
+      setRangePreset(state.rangePreset, { skipSave: true });
+    }
     if (state.rangeCenter) {
       placeRangeRings(state.rangeCenter);
       rangeClear.hidden = false;
@@ -1888,6 +1930,7 @@ function resetMapToDefaults() {
     setPoiToggle('militaryMajor', 'military-major', false, { skipSave: true });
     setPoiToggle('militaryOther', 'military-other', false, { skipSave: true });
 
+    setRangePreset('long', { skipSave: true });
     setRangeToolActive(false, { skipSave: true });
     popupEl.style.display = 'none';
 
