@@ -16,10 +16,10 @@ HTML/CSS/JS — no build step.
   - OpenStreetMap (transportation)
   - Esri World Imagery (satellite)
   - OpenTopoMap (topographic)
-- **Animated weather overlays** from Environment Canada GeoMet, driven by
-  a shared master timeline:
-  - Radar — 1 km grid, 6-min cadence
-  - GDPS total cloud cover — 15 km grid, hourly cadence
+- **Weather (WX) dropdown** — one GeoMet WMS overlay at a time (Current or
+  Forecast), with a shared timeline:
+  - **Current:** radar (1 km / 6 min), 6 h precip analysis (RDPA), 10 m wind
+  - **Forecast (GDPS):** 1 h precip, 10 m wind, total cloud cover
 - **Eight tiered POI overlays**, pre-clipped to scenario land:
   - **Military-capable airfields** by longest usable runway against USAF
     cargo-aircraft minima:

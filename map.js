@@ -384,14 +384,42 @@ const popupBody   = document.getElementById('popup-content');
 const popupClose  = document.getElementById('popup-close');
 const popupOverlay = new ol.Overlay({
   element: popupEl,
-  positioning: 'bottom-center',
-  // Small standoff so the popup body doesn't sit exactly on the cursor.
-  offset: [0, -8],
+  positioning: 'center-left',
+  offset: [8, 0],
   stopEvent: true,
   autoPan: { animation: { duration: 250 }, margin: 40 },
 });
 map.addOverlay(popupOverlay);
-popupClose.addEventListener('click', () => { popupEl.style.display = 'none'; });
+let popupAnchorCoord = null;
+
+function hidePopup() {
+  popupEl.style.display = 'none';
+  popupAnchorCoord = null;
+  popupOverlay.setPosition(undefined);
+}
+
+/** Side-mounted yellow tip points at the anchor (kentucky-owls Leaflet style). */
+function positionAnchoredPopup(coord) {
+  const pixel = map.getPixelFromCoordinate(coord);
+  const mapW = map.getTargetElement().clientWidth;
+  const tipRight = pixel[0] > mapW * 0.52;
+  popupEl.classList.toggle('ol-popup--tip-right', tipRight);
+  popupEl.classList.toggle('ol-popup--tip-left', !tipRight);
+  popupOverlay.setPositioning(tipRight ? 'center-right' : 'center-left');
+  popupOverlay.setOffset(tipRight ? [-8, 0] : [8, 0]);
+  popupOverlay.setPosition(coord);
+}
+
+function showAnchoredPopup(coord) {
+  popupAnchorCoord = coord.slice();
+  positionAnchoredPopup(coord);
+  popupEl.style.display = 'flex';
+}
+
+popupClose.addEventListener('click', hidePopup);
+map.getView().on(['change:center', 'change:resolution'], () => {
+  if (popupAnchorCoord) positionAnchoredPopup(popupAnchorCoord);
+});
 
 /** Tint popup background + border to match scenario country palette. */
 function applyPopupCountryTheme(countryName) {
@@ -399,6 +427,7 @@ function applyPopupCountryTheme(countryName) {
   popupEl.style.setProperty('--popup-tint', blendHexWithWhite(s.fill, 0.18));
   popupEl.style.setProperty('--popup-border', s.stroke);
   popupEl.style.setProperty('--popup-divider', hexAlpha(s.fill, 0.35));
+  popupEl.style.setProperty('--popup-tip', '#ffee00');
 }
 
 function fmtArea(m2) {
@@ -411,13 +440,13 @@ map.on('click', (evt) => {
   // the cursor and skips the country popup.
   if (rangeToolActive) {
     placeRangeRings(evt.coordinate);
-    popupEl.style.display = 'none';
+    hidePopup();
     return;
   }
   const f = map.forEachFeatureAtPixel(evt.pixel, (fr, layer) =>
     layer === countriesLayer ? fr : null
   );
-  if (!f) { popupEl.style.display = 'none'; return; }
+  if (!f) { hidePopup(); return; }
 
   const p = f.getProperties();
   const name  = p.LABEL_TXT || p.NAME || '(unnamed)';
@@ -434,8 +463,7 @@ map.on('click', (evt) => {
       <span class="k">Group</span><span class="v">${group}</span>
       <span class="k">Area</span><span class="v">${fmtArea(p.Shape_Area)}</span>
     </div>`;
-  popupEl.style.display = '';
-  popupOverlay.setPosition(evt.coordinate);
+  showAnchoredPopup(evt.coordinate);
 });
 
 // ----- Reset-view control (custom) -----
@@ -495,164 +523,307 @@ countriesSource.on('featuresloaderror', () => {
 });
 
 // =============================================================
-// Weather overlays — Environment Canada GeoMet (WMS, EPSG:3978)
+// Weather (WX) — single shared GeoMet WMS layer, one active at a time
 // =============================================================
 const GEOMET_URL = 'https://geo.weather.gc.ca/geomet';
 
-// GeoMet WMS time dimension wants strict ISO8601 to seconds (no millis).
 function isoSec(d) { return d.toISOString().replace(/\.\d+Z$/, 'Z'); }
 
-const FRAME_DURATION_MS = 500;   // 2 fps
+const WX_FRAME_MS = 500;
 const $ = (id) => document.getElementById(id);
 
-// ----- Master animation controller -----
-// One timeline drives all enabled weather layers. The master cadence is
-// the smallest cadence among layers (radar = 6 min). Each layer rounds
-// the master timestamp to its OWN cadence — so radar updates every step,
-// cloud cover updates only every 10 steps (60 / 6). Both end up showing
-// the same effective moment in wall-clock time.
-const BASE_CADENCE_MIN  = 6;
-const MASTER_FRAMES     = 30;   // 3 hours of history at 6-min steps
-const MASTER_LATENCY_MIN = 10;
+/** @type {Record<string, object>} */
+const WX_DEFINITIONS = {
+  'cur-radar': {
+    timeline: 'past',
+    layerName: 'RADAR_1KM_RRAI',
+    styles: '',
+    stepMin: 6,
+    frames: 30,
+    latencyMin: 10,
+    opacity: 0.75,
+  },
+  'cur-precip': {
+    timeline: 'past',
+    layerName: 'RDPA.6F_PR',
+    styles: '',
+    stepMin: 60,
+    frames: 24,
+    latencyMin: 60,
+    opacity: 0.78,
+  },
+  'cur-wind': {
+    timeline: 'past',
+    layerName: 'GDPS.ETA_UU',
+    styles: 'WINDARROW',
+    stepMin: 60,
+    frames: 24,
+    latencyMin: 90,
+    opacity: 0.88,
+  },
+  'fc-precip': {
+    timeline: 'forecast',
+    layerName: 'GDPS.DIAG_NW_PT1H',
+    styles: '',
+    stepMin: 180,
+    frames: 17,
+    opacity: 0.78,
+  },
+  'fc-wind': {
+    timeline: 'forecast',
+    layerName: 'GDPS.ETA_UU',
+    styles: 'WINDARROW',
+    stepMin: 180,
+    frames: 17,
+    opacity: 0.88,
+  },
+  'fc-cloud': {
+    timeline: 'forecast',
+    layerName: 'GDPS_15km_TotalCloudCover',
+    styles: '',
+    stepMin: 60,
+    frames: 25,
+    opacity: 0.72,
+  },
+};
 
-const animatedLayers = []; // [{ layer, source, cadenceMs, lastTime, panelId }]
-let masterFrame = MASTER_FRAMES - 1;
-let masterTimer = null;
-let masterPlaying = false;
-let baseLatestMs = 0;
+let activeWxId = null;
+let activeWxDef = null;
+let wxFrame = 0;
+let wxTimer = null;
+let wxPlaying = false;
+let wxBaseLatestMs = 0;
+let wxReferenceMs = 0;
+let wxLastTimeIso = null;
+let wxPendingTiles = 0;
+let _wxSwitchGen = 0;
 
-function refreshBaseLatest() {
-  const cMs = BASE_CADENCE_MIN * 60_000;
-  baseLatestMs = Math.floor((Date.now() - MASTER_LATENCY_MIN * 60_000) / cMs) * cMs;
+const wxSource = new ol.source.TileWMS({
+  url: GEOMET_URL,
+  params: {
+    LAYERS: 'RADAR_1KM_RRAI',
+    FORMAT: 'image/png',
+    TRANSPARENT: true,
+    VERSION: '1.3.0',
+  },
+});
+const wxLayer = new ol.layer.Tile({ visible: false, opacity: 0.75, source: wxSource, zIndex: 45 });
+map.addLayer(wxLayer);
+
+wxSource.on('tileloadstart', () => {
+  wxPendingTiles++;
+  $('wx-loading')?.classList.add('on');
+});
+wxSource.on('tileloadend', () => {
+  wxPendingTiles = Math.max(0, wxPendingTiles - 1);
+  if (wxPendingTiles === 0) $('wx-loading')?.classList.remove('on');
+});
+wxSource.on('tileloaderror', () => {
+  wxPendingTiles = Math.max(0, wxPendingTiles - 1);
+  if (wxPendingTiles === 0) $('wx-loading')?.classList.remove('on');
+});
+
+function estimateGdpsReferenceMs() {
+  const now = Date.now();
+  const d = new Date(now);
+  const y = d.getUTCFullYear();
+  const mo = d.getUTCMonth();
+  const day = d.getUTCDate();
+  const h = d.getUTCHours();
+  const today12 = Date.UTC(y, mo, day, 12, 0, 0);
+  const today00 = Date.UTC(y, mo, day, 0, 0, 0);
+  const lagMs = 90 * 60_000;
+  if (now >= today12 + lagMs) return today12;
+  if (now >= today00 + lagMs) return today00;
+  return today00 - 12 * 3600_000;
 }
-refreshBaseLatest();
-setInterval(refreshBaseLatest, 5 * 60_000);
 
-function masterTimeAt(idx) {
-  return new Date(baseLatestMs - (MASTER_FRAMES - 1 - idx) * BASE_CADENCE_MIN * 60_000);
+async function resolveForecastReferenceMs(def) {
+  try {
+    const url = `${GEOMET_URL}?service=WMS&version=1.3.0&request=GetCapabilities&layer=${encodeURIComponent(def.layerName)}`;
+    const text = await fetch(url).then((r) => r.text());
+    const m = text.match(/name="reference_time"[^>]*default="([^"]+)"/i);
+    if (m) return new Date(m[1]).getTime();
+  } catch (e) {
+    console.warn('[wx] reference_time lookup failed:', e);
+  }
+  return estimateGdpsReferenceMs();
 }
-function fmtMasterTime(d, idx) {
-  const hh = String(d.getUTCHours()).padStart(2, '0');
-  const mm = String(d.getUTCMinutes()).padStart(2, '0');
-  const minsBack = (MASTER_FRAMES - 1 - idx) * BASE_CADENCE_MIN;
+
+function refreshWxBaseLatest(def) {
+  const cMs = def.stepMin * 60_000;
+  wxBaseLatestMs = Math.floor((Date.now() - def.latencyMin * 60_000) / cMs) * cMs;
+}
+
+function wxTimeAtFrame(def, idx) {
+  if (def.timeline === 'forecast') {
+    return new Date(wxReferenceMs + idx * def.stepMin * 60_000);
+  }
+  return new Date(wxBaseLatestMs - (def.frames - 1 - idx) * def.stepMin * 60_000);
+}
+
+function fmtWxTimeLabel(def, idx) {
+  const t = wxTimeAtFrame(def, idx);
+  const hh = String(t.getUTCHours()).padStart(2, '0');
+  const mm = String(t.getUTCMinutes()).padStart(2, '0');
+  if (def.timeline === 'forecast') {
+    const fh = Math.round((t.getTime() - wxReferenceMs) / 3600_000);
+    return `${hh}:${mm}Z (+${fh}h)`;
+  }
+  const minsBack = (def.frames - 1 - idx) * def.stepMin;
   const ago = minsBack === 0 ? 'now' : `−${minsBack}m`;
   return `${hh}:${mm}Z (${ago})`;
 }
-function applyMasterFrame() {
-  const t = masterTimeAt(masterFrame);
-  // For each visible layer, round t to that layer's cadence and update
-  // the WMS TIME param only if it actually changed (prevents redundant fetches).
-  for (const al of animatedLayers) {
-    if (!al.layer.getVisible()) continue;
-    const rounded = Math.floor(t.getTime() / al.cadenceMs) * al.cadenceMs;
-    const iso = isoSec(new Date(rounded));
-    if (iso !== al.lastTime) {
-      al.source.updateParams({ TIME: iso });
-      al.lastTime = iso;
+
+function buildWxParams(def, idx) {
+  const t = wxTimeAtFrame(def, idx);
+  const params = {
+    LAYERS: def.layerName,
+    STYLES: def.styles || '',
+    FORMAT: 'image/png',
+    TRANSPARENT: true,
+    VERSION: '1.3.0',
+    TIME: isoSec(t),
+  };
+  if (def.timeline === 'forecast') {
+    params.DIM_REFERENCE_TIME = isoSec(new Date(wxReferenceMs));
+  }
+  return params;
+}
+
+function applyWxFrame() {
+  if (!activeWxDef) return;
+  const def = activeWxDef;
+  const iso = isoSec(wxTimeAtFrame(def, wxFrame));
+  if (iso === wxLastTimeIso) {
+    $('wx-time').textContent = fmtWxTimeLabel(def, wxFrame);
+    $('wx-slider').value = String(wxFrame);
+    return;
+  }
+  wxLastTimeIso = iso;
+  wxSource.updateParams(buildWxParams(def, wxFrame));
+  wxSource.refresh();
+  $('wx-time').textContent = fmtWxTimeLabel(def, wxFrame);
+  $('wx-slider').max = String(def.frames - 1);
+  $('wx-slider').value = String(wxFrame);
+}
+
+function setWxFrame(idx) {
+  if (!activeWxDef) return;
+  wxFrame = Math.max(0, Math.min(activeWxDef.frames - 1, idx));
+  applyWxFrame();
+}
+
+function startWxAnim() {
+  if (wxTimer || !activeWxDef) return;
+  wxTimer = setInterval(() => setWxFrame((wxFrame + 1) % activeWxDef.frames), WX_FRAME_MS);
+  wxPlaying = true;
+  $('wx-play').textContent = '⏸';
+}
+
+function stopWxAnim() {
+  if (wxTimer) clearInterval(wxTimer);
+  wxTimer = null;
+  wxPlaying = false;
+  $('wx-play').textContent = '▶';
+}
+
+async function setWxLayer(id) {
+  const gen = ++_wxSwitchGen;
+  stopWxAnim();
+  activeWxId = id;
+  activeWxDef = id ? WX_DEFINITIONS[id] : null;
+  wxLastTimeIso = null;
+
+  if (!activeWxDef) {
+    wxLayer.setVisible(false);
+    $('wx-controls').style.display = 'none';
+    $('wx-loading')?.classList.remove('on');
+    return;
+  }
+
+  const def = activeWxDef;
+  wxLayer.setOpacity(def.opacity);
+  wxFrame = def.timeline === 'forecast' ? 0 : def.frames - 1;
+
+  // Drop stale TIME / reference_time from a prior layer (OL merges params).
+  const cleared = { ...wxSource.getParams() };
+  delete cleared.TIME;
+  delete cleared.DIM_REFERENCE_TIME;
+  wxSource.updateParams(cleared);
+
+  if (def.timeline === 'forecast') {
+    wxReferenceMs = await resolveForecastReferenceMs(def);
+  } else {
+    refreshWxBaseLatest(def);
+  }
+  if (gen !== _wxSwitchGen) return;
+
+  wxLayer.setVisible(true);
+  $('wx-controls').style.display = '';
+  applyWxFrame();
+  startWxAnim();
+}
+
+function activeWxFromRadios() {
+  const fc = document.querySelector('input[name="wx-forecast"]:checked')?.value;
+  if (fc && fc !== 'none') return fc;
+  const cur = document.querySelector('input[name="wx-current"]:checked')?.value;
+  if (cur && cur !== 'none') return cur;
+  return null;
+}
+
+function onWxRadioChange(changedGroup) {
+  if (changedGroup === 'current') {
+    const cur = document.querySelector('input[name="wx-current"]:checked')?.value;
+    if (cur && cur !== 'none') {
+      const fcNone = document.querySelector('input[name="wx-forecast"][value="none"]');
+      if (fcNone) fcNone.checked = true;
+    }
+  } else {
+    const fc = document.querySelector('input[name="wx-forecast"]:checked')?.value;
+    if (fc && fc !== 'none') {
+      const curNone = document.querySelector('input[name="wx-current"][value="none"]');
+      if (curNone) curNone.checked = true;
     }
   }
-  $('master-time').textContent = fmtMasterTime(t, masterFrame);
-  $('master-slider').value = masterFrame;
+  setWxLayer(activeWxFromRadios());
+  scheduleSaveMapState();
 }
-function setMasterFrame(idx) { masterFrame = idx; applyMasterFrame(); }
-function startMaster() {
-  if (masterTimer) return;
-  masterTimer = setInterval(() => setMasterFrame((masterFrame + 1) % MASTER_FRAMES), FRAME_DURATION_MS);
-  masterPlaying = true;
-  $('master-play').textContent = '⏸';
-}
-function stopMaster() {
-  if (masterTimer) clearInterval(masterTimer);
-  masterTimer = null;
-  masterPlaying = false;
-  $('master-play').textContent = '▶';
-}
-function anyLayerVisible() { return animatedLayers.some(al => al.layer.getVisible()); }
 
-// Wire master controls
-$('master-play').addEventListener('click', () => {
-  if (masterPlaying) stopMaster(); else startMaster();
+for (const el of document.querySelectorAll('input[name="wx-current"]')) {
+  el.addEventListener('change', () => onWxRadioChange('current'));
+}
+for (const el of document.querySelectorAll('input[name="wx-forecast"]')) {
+  el.addEventListener('change', () => onWxRadioChange('forecast'));
+}
+
+$('wx-play').addEventListener('click', () => {
+  if (wxPlaying) stopWxAnim(); else startWxAnim();
   scheduleSaveMapState();
 });
-$('master-slider').addEventListener('input', (e) => {
-  stopMaster();
-  setMasterFrame(parseInt(e.target.value, 10));
+$('wx-slider').addEventListener('input', (e) => {
+  stopWxAnim();
+  setWxFrame(parseInt(e.target.value, 10));
   scheduleSaveMapState();
 });
 
-// ----- Layer setup: registers a layer + toggle handler. No per-layer animation. -----
-// crossOrigin is intentionally omitted — we don't need pixel access.
-function setupAnimatedWmsLayer({ panelId, layerName, cadenceMin, opacity, zIndex }) {
-  const cadenceMs = cadenceMin * 60_000;
-  const source = new ol.source.TileWMS({
-    url: GEOMET_URL,
-    params: { LAYERS: layerName, FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.3.0' },
-  });
-  const layer = new ol.layer.Tile({ visible: false, opacity, source, zIndex });
-  map.addLayer(layer);
-
-  const al = { layer, source, cadenceMs, lastTime: null, panelId };
-  animatedLayers.push(al);
-
-  // Tile event hooks: loading indicator + error reporting
-  let pending = 0, loaded = 0, errors = 0;
-  source.on('tileloadstart', (e) => {
-    pending++;
-    $(panelId + '-loading').classList.add('on');
-    if (loaded + errors === 0) {
-      console.log(`[${panelId}] first tile URL:`, e.tile.src_ || e.tile.getImage().src);
-    }
-  });
-  source.on('tileloadend', () => {
-    loaded++;
-    pending = Math.max(0, pending - 1);
-    if (pending === 0) $(panelId + '-loading').classList.remove('on');
-  });
-  source.on('tileloaderror', (e) => {
-    errors++;
-    pending = Math.max(0, pending - 1);
-    if (pending === 0) $(panelId + '-loading').classList.remove('on');
-    console.warn(`[${panelId}] tile failed:`, e.tile.src_ || e.tile.getImage().src);
-  });
-
-  // Toggle: on first enable, show master controls + start anim if not running
-  $('toggle-' + panelId).addEventListener('change', (e) => {
-    if (e.target.checked) {
-      layer.setVisible(true);
-      al.lastTime = null;  // force update on the next applyMasterFrame
-      $('master-controls').style.display = '';
-      applyMasterFrame();
-      if (!masterPlaying) startMaster();
-    } else {
-      layer.setVisible(false);
-      $(panelId + '-loading').classList.remove('on');
-      if (!anyLayerVisible()) {
-        stopMaster();
-        $('master-controls').style.display = 'none';
-      }
-    }
-    scheduleSaveMapState();
-  });
+function migrateWxState(state) {
+  if (!state) return state;
+  if (state.wxCurrent !== undefined || state.wxForecast !== undefined) return state;
+  const next = { ...state };
+  if (state.radar) {
+    next.wxCurrent = 'cur-radar';
+    next.wxForecast = 'none';
+  } else if (state.cloud) {
+    next.wxCurrent = 'none';
+    next.wxForecast = 'fc-cloud';
+  } else {
+    next.wxCurrent = 'none';
+    next.wxForecast = 'none';
+  }
+  return next;
 }
-
-// Radar — Rain Rate Reflectivity, 1km grid, 6-min cadence
-setupAnimatedWmsLayer({
-  panelId:    'radar',
-  layerName:  'RADAR_1KM_RRAI',
-  cadenceMin: 6,
-  opacity:    0.75,
-  zIndex:     50,    // above country fills (default 0), below labels (100)
-});
-
-// GDPS total cloud cover — global NWP, 15km grid, hourly cadence.
-// Renders only clouds (transparent over clear sky), no surface terrain.
-setupAnimatedWmsLayer({
-  panelId:    'cloud',
-  layerName:  'GDPS_15km_TotalCloudCover',
-  cadenceMin: 60,
-  opacity:    0.7,
-  zIndex:     40,    // below radar so radar wins compositing when both on
-});
 
 // =============================================================
 // Basemaps — terrain/imagery tiles clipped to country polygons
@@ -1843,7 +2014,7 @@ map.on('click', (evt) => {
     } else {
       view.fit(ext, { padding: [60, 60, 60, 60], duration: 300, maxZoom: 12 });
     }
-    popupEl.style.display = 'none';
+    hidePopup();
     return;
   }
 
@@ -1854,10 +2025,7 @@ map.on('click', (evt) => {
   const poiCoord = poi.getGeometry()?.getCoordinates();
   applyPopupCountryTheme(poiCoord ? scenarioCountryAtCoord(poiCoord) : null);
   popupBody.innerHTML = html;
-  popupEl.style.display = '';
-  // Position the popup at the feature's actual point geometry, not the
-  // click pixel — keeps the popup anchored if the user pans afterward.
-  popupOverlay.setPosition(poi.getGeometry().getCoordinates());
+  showAnchoredPopup(poi.getGeometry().getCoordinates());
 });
 
 // Extend hover: pointer cursor over POI markers and cluster bubbles.
@@ -1884,8 +2052,8 @@ function setPoiOpen(open) {
 poiToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   setPoiOpen(!poiControl.classList.contains('open'));
-  // Auto-close the sibling dropdowns so they don't overlap on narrow screens.
   setLayersOpen(false);
+  setWxOpen(false);
   setInfoOpen(false);
 });
 poiPanel.addEventListener('click', (e) => e.stopPropagation());
@@ -1913,6 +2081,7 @@ infoToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   setInfoOpen(!infoControl.classList.contains('open'));
   setLayersOpen(false);
+  setWxOpen(false);
   setPoiOpen(false);
 });
 infoPanel.addEventListener('click', (e) => e.stopPropagation());
@@ -1923,6 +2092,43 @@ document.addEventListener('keydown', (e) => {
     infoToggle.focus();
   }
 });
+
+// =============================================================
+// Weather (WX) panel dropdown
+// =============================================================
+const wxControl = document.getElementById('wx-control');
+const wxToggle  = document.getElementById('wx-toggle');
+const wxPanel   = document.getElementById('wx-panel');
+
+function setWxOpen(open) {
+  wxControl.classList.toggle('open', open);
+  wxToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) wxPanel.removeAttribute('hidden');
+  else wxPanel.setAttribute('hidden', '');
+}
+wxToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  setWxOpen(!wxControl.classList.contains('open'));
+  setLayersOpen(false);
+  setPoiOpen(false);
+  setInfoOpen(false);
+});
+wxPanel.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => setWxOpen(false));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && wxControl.classList.contains('open')) {
+    setWxOpen(false);
+    wxToggle.focus();
+  }
+});
+
+// Refresh "past" timeline anchor while a current layer is active.
+setInterval(() => {
+  if (!activeWxDef || activeWxDef.timeline !== 'past') return;
+  const prev = wxBaseLatestMs;
+  refreshWxBaseLatest(activeWxDef);
+  if (wxBaseLatestMs !== prev) applyWxFrame();
+}, 5 * 60_000);
 
 // =============================================================
 // Layers panel dropdown
@@ -1944,8 +2150,8 @@ function setLayersOpen(open) {
 layersToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   setLayersOpen(!layersControl.classList.contains('open'));
-  // Close the sibling dropdowns so the panels don't overlap.
   setPoiOpen(false);
+  setWxOpen(false);
   setInfoOpen(false);
 });
 layersPanel.addEventListener('click', (e) => e.stopPropagation());
@@ -1987,10 +2193,10 @@ function saveMapState() {
     basemap: document.querySelector('input[name="basemap"]:checked')?.value || 'none',
     countryTint: countryTintActive,
     countryTintPct: Math.round(countryTintAlpha * 100),
-    radar: $('toggle-radar').checked,
-    cloud: $('toggle-cloud').checked,
-    masterFrame,
-    masterPlaying,
+    wxCurrent: document.querySelector('input[name="wx-current"]:checked')?.value || 'none',
+    wxForecast: document.querySelector('input[name="wx-forecast"]:checked')?.value || 'none',
+    wxFrame,
+    wxPlaying,
     poi: { ...poiEnabled },
     rangeTool: rangeToolActive,
     rangePreset,
@@ -2003,26 +2209,19 @@ function saveMapState() {
   }
 }
 
-function setWeatherLayer(panelId, on, { skipSave = false } = {}) {
-  const al = animatedLayers.find((x) => x.panelId === panelId);
-  if (!al) return;
-  const el = $('toggle-' + panelId);
-  if (el) el.checked = on;
-  if (on) {
-    al.layer.setVisible(true);
-    al.lastTime = null;
-    $('master-controls').style.display = '';
-    applyMasterFrame();
-    if (!masterPlaying) startMaster();
-  } else {
-    al.layer.setVisible(false);
-    $(panelId + '-loading').classList.remove('on');
-    if (!anyLayerVisible()) {
-      stopMaster();
-      $('master-controls').style.display = 'none';
+function setWxRadios(currentVal, forecastVal, { skipSave = false, frame, playing } = {}) {
+  const curEl = document.querySelector(`input[name="wx-current"][value="${currentVal || 'none'}"]`);
+  const fcEl = document.querySelector(`input[name="wx-forecast"][value="${forecastVal || 'none'}"]`);
+  if (curEl) curEl.checked = true;
+  if (fcEl) fcEl.checked = true;
+  return setWxLayer(activeWxFromRadios()).then(() => {
+    if (typeof frame === 'number' && activeWxDef) {
+      setWxFrame(Math.max(0, Math.min(activeWxDef.frames - 1, frame)));
     }
-  }
-  if (!skipSave) scheduleSaveMapState();
+    if (playing && activeWxDef) startWxAnim();
+    else stopWxAnim();
+    if (!skipSave) scheduleSaveMapState();
+  });
 }
 
 function migrateSavedPoiState(poi) {
@@ -2040,7 +2239,7 @@ function restoreMapState(state) {
   if (!state) return;
   _restoringMapState = true;
   try {
-    state = { ...state, poi: migrateSavedPoiState(state.poi) };
+    state = migrateWxState({ ...state, poi: migrateSavedPoiState(state.poi) });
     applyBasemap(state.basemap || 'none', { skipSave: true });
     tintToggleEl.checked = !!state.countryTint;
     countryTintActive = !!state.countryTint;
@@ -2051,14 +2250,11 @@ function restoreMapState(state) {
     tintValueEl.textContent = String(pct);
     countriesSource.changed();
 
-    setWeatherLayer('radar', !!state.radar, { skipSave: true });
-    setWeatherLayer('cloud', !!state.cloud, { skipSave: true });
-    if (typeof state.masterFrame === 'number') {
-      masterFrame = Math.max(0, Math.min(MASTER_FRAMES - 1, state.masterFrame));
-      applyMasterFrame();
-    }
-    if (state.masterPlaying && anyLayerVisible()) startMaster();
-    else stopMaster();
+    setWxRadios(state.wxCurrent || 'none', state.wxForecast || 'none', {
+      skipSave: true,
+      frame: state.wxFrame ?? state.masterFrame,
+      playing: state.wxPlaying ?? state.masterPlaying,
+    });
 
     for (const cfg of POI_TOGGLE_SPECS) {
       setPoiToggle(cfg.key, cfg.panelId, !!state.poi?.[cfg.key], { skipSave: true, skipRefresh: true });
@@ -2100,11 +2296,7 @@ function resetMapToDefaults() {
     tintValueEl.textContent = '40';
     countriesSource.changed();
 
-    setWeatherLayer('radar', false, { skipSave: true });
-    setWeatherLayer('cloud', false, { skipSave: true });
-    stopMaster();
-    masterFrame = MASTER_FRAMES - 1;
-    applyMasterFrame();
+    setWxRadios('none', 'none', { skipSave: true, frame: 0, playing: false });
 
     for (const cfg of POI_TOGGLE_SPECS) {
       setPoiToggle(cfg.key, cfg.panelId, false, { skipSave: true, skipRefresh: true });
@@ -2118,7 +2310,7 @@ function resetMapToDefaults() {
 
     setRangePreset('long', { skipSave: true });
     setRangeToolActive(false, { skipSave: true });
-    popupEl.style.display = 'none';
+    hidePopup();
 
     _suppressViewSave = true;
     try {

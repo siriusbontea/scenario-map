@@ -79,19 +79,18 @@
         (CC-BY-SA), &copy; OSM contributors
       </div>
 
-      <div class="info-group">Weather overlays</div>
-      <div class="info-row">
-        <b>Radar</b> (1 km / 6 min) —
+      <div class="info-group">Weather (WX) overlays</div>
+      <div class="info-row info-row--note">
+        One layer at a time (Current or Forecast). All from
         <a href="https://eccc-msc.github.io/open-data/msc-geomet/readme_geomet_en/"
            target="_blank" rel="noopener">Environment Canada GeoMet</a>
-        (<code>RADAR_1KM_RRAI</code>)
+        (Open Government Licence — Canada).
       </div>
-      <div class="info-row">
-        <b>Cloud cover</b> (15 km / hourly) —
-        <a href="https://eccc-msc.github.io/open-data/msc-geomet/readme_geomet_en/"
-           target="_blank" rel="noopener">Environment Canada GeoMet</a>
-        (<code>GDPS_15km_TotalCloudCover</code>)
-      </div>
+      <div class="info-row"><b>Current:</b> radar (<code>RADAR_1KM_RRAI</code>),
+        6 h precip analysis (<code>RDPA.6F_PR</code>),
+        10 m wind (<code>GDPS.ETA_UU</code> / <code>WINDARROW</code>)</div>
+      <div class="info-row"><b>Forecast (GDPS):</b> 1 h precip (<code>GDPS.DIAG_NW_PT1H</code>),
+        10 m wind, total cloud cover (<code>GDPS_15km_TotalCloudCover</code>)</div>
 
       <div class="info-group">Point overlays</div>
       <div class="info-row">
@@ -266,7 +265,69 @@
     </div>
   </div>
 
-  <!-- POI overlays — second dropdown, sits left of the basemap/weather one -->
+  <!-- Weather (WX) — one active layer at a time; sits left of Layers -->
+  <div class="layers-control layers-control--wx" id="wx-control">
+    <button class="layers-toggle" id="wx-toggle" type="button"
+            aria-label="Toggle weather panel" aria-expanded="false"
+            aria-controls="wx-panel" title="Weather (WX)">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+           stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17.5 19a4.5 4.5 0 1 0-8.5-2.5A5.5 5.5 0 1 0 6 18h11.5Z"></path>
+        <path d="M8 16v-1"></path>
+        <path d="M12 14v-1"></path>
+        <path d="M16 16v-1"></path>
+      </svg>
+    </button>
+    <div class="weather-panel wx-panel" id="wx-panel" hidden>
+      <h4>Weather (WX)</h4>
+      <p class="wx-note">One overlay at a time — pick Current or Forecast.</p>
+
+      <fieldset class="wx-section">
+        <legend>Current</legend>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-current" value="none" checked> None
+        </label>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-current" value="cur-radar"> Radar — 1 km / 6 min
+        </label>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-current" value="cur-precip"> Precip — 6 h analysis
+        </label>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-current" value="cur-wind"> Wind — 10 m arrows
+        </label>
+      </fieldset>
+
+      <fieldset class="wx-section">
+        <legend>Forecast (GDPS)</legend>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-forecast" value="none" checked> None
+        </label>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-forecast" value="fc-precip"> Precip — 1 h / 3 h steps
+        </label>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-forecast" value="fc-wind"> Wind — 10 m arrows / 3 h
+        </label>
+        <label class="weather-toggle">
+          <input type="radio" name="wx-forecast" value="fc-cloud"> Cloud cover — hourly
+        </label>
+      </fieldset>
+
+      <div id="wx-controls" class="anim-controls" style="display:none">
+        <div class="anim-row">
+          <button id="wx-play" class="anim-btn" title="Play / Pause">⏸</button>
+          <input type="range" id="wx-slider" min="0" max="29" value="29" step="1" />
+          <span id="wx-loading" class="anim-loading"></span>
+        </div>
+        <div class="anim-time" id="wx-time">--:--Z</div>
+        <div class="anim-source">GeoMet WMS · one layer active</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- POI overlays — sits left of WX -->
   <div class="layers-control layers-control--poi" id="poi-control">
     <button class="layers-toggle" id="poi-toggle" type="button"
             aria-label="Toggle POI overlays panel" aria-expanded="false"
@@ -495,26 +556,6 @@
 
     <hr />
 
-    <h4>Weather Overlays (Real-world)</h4>
-    <label class="weather-toggle">
-      <input type="checkbox" id="toggle-radar"> Radar — 1 km / 6 min
-      <span id="radar-loading" class="anim-loading"></span>
-    </label>
-    <label class="weather-toggle">
-      <input type="checkbox" id="toggle-cloud"> Cloud cover — 15 km / hourly
-      <span id="cloud-loading" class="anim-loading"></span>
-    </label>
-    <div id="master-controls" class="anim-controls" style="display:none">
-      <div class="anim-row">
-        <button id="master-play" class="anim-btn" title="Play / Pause">⏸</button>
-        <input type="range" id="master-slider" min="0" max="29" value="29" step="1" />
-      </div>
-      <div class="anim-time" id="master-time">--:--Z</div>
-      <div class="anim-source">Synced timeline · Environment Canada GeoMet</div>
-    </div>
-
-    <hr />
-
     <button type="button" id="reset-map-btn" class="reset-map-btn"
             title="Clear saved layers, overlays, and view — return to defaults">
       Reset map
@@ -576,9 +617,12 @@
     </div>
   </div>
 
-  <div id="popup" class="ol-popup" style="display:none">
-    <span class="ol-popup-close" id="popup-close">×</span>
-    <div id="popup-content"></div>
+  <div id="popup" class="ol-popup ol-popup--tip-left" style="display:none">
+    <div class="ol-popup-tip" aria-hidden="true"></div>
+    <div class="ol-popup-inner">
+      <span class="ol-popup-close" id="popup-close">×</span>
+      <div id="popup-content"></div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.10.0/dist/proj4.js"></script>
