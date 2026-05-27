@@ -421,12 +421,12 @@ map.getView().on(['change:center', 'change:resolution'], () => {
   if (popupAnchorCoord) positionAnchoredPopup(popupAnchorCoord);
 });
 
-/** Tint popup background + border to match scenario country palette. */
+/** Tint popup background + border to match scenario country palette (legend fills). */
 function applyPopupCountryTheme(countryName) {
   const s = (countryName && COUNTRY_STYLE[countryName]) || DEFAULT_STYLE;
   popupEl.style.setProperty('--popup-tint', blendHexWithWhite(s.fill, 0.18));
-  popupEl.style.setProperty('--popup-border', s.stroke);
-  popupEl.style.setProperty('--popup-divider', hexAlpha(s.fill, 0.35));
+  popupEl.style.setProperty('--popup-border', s.fill);
+  popupEl.style.setProperty('--popup-divider', hexAlpha(s.fill, 0.4));
   popupEl.style.setProperty('--popup-tip', '#ffee00');
 }
 
