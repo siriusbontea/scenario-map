@@ -273,6 +273,14 @@ function fmtMgrs(lat, lon) {
   }
 }
 
+/** Lat/lon + MGRS rows for popups (coord in EPSG:3978 map meters). */
+function popupGeoRowsFromCoord(coord3978) {
+  const [lon, lat] = ol.proj.toLonLat(coord3978, 'EPSG:3978');
+  return `
+      <span class="k">Lat/Lon</span><span class="v v-coords">${fmtLatLon(lat, lon)}</span>
+      <span class="k">MGRS</span><span class="v v-coords">${fmtMgrs(lat, lon)}</span>`;
+}
+
 map.on('pointermove', (evt) => {
   if (evt.dragging) return;
   const [lon, lat] = ol.proj.toLonLat(evt.coordinate, 'EPSG:3978');
@@ -361,6 +369,7 @@ map.on('click', (evt) => {
     <h3>${name}</h3>
     <div class="kv">
       <span class="k">Type</span><span class="v"><span class="badge">${type}</span></span>
+      ${popupGeoRowsFromCoord(evt.coordinate)}
       <span class="k">Name</span><span class="v">${p.NAME ?? '—'}</span>
       <span class="k">Label</span><span class="v">${p.LABEL_TXT ?? '<em>(none)</em>'}</span>
       <span class="k">Group</span><span class="v">${group}</span>
@@ -1727,10 +1736,13 @@ function renderPoiPopup(feature) {
   } else {
     return null;
   }
+  const geom = feature.getGeometry();
+  const geoRows = geom ? popupGeoRowsFromCoord(geom.getCoordinates()) : '';
   return `
     <h3>${title}</h3>
     <div class="kv">
       <span class="k">Type</span><span class="v"><span class="badge">${badge}</span></span>
+      ${geoRows}
       ${rows}
     </div>`;
 }
