@@ -1015,10 +1015,13 @@ rangeInfo.addEventListener('click', () => {
 
 // Per-kind single-feature style (used when a cluster wraps exactly one
 // point) — colored disc + glyph. Built once each, reused for every render.
+const POI_DISC_RADIUS = 7;
+const POI_EMPHASIS_RING_RADIUS = 11;
+
 function poiStyle({ fill, stroke, glyph, glyphFill }) {
   return new ol.style.Style({
     image: new ol.style.Circle({
-      radius: 7,
+      radius: POI_DISC_RADIUS,
       fill:   new ol.style.Fill({ color: fill }),
       stroke: new ol.style.Stroke({ color: stroke, width: 1.2 }),
     }),
@@ -1029,6 +1032,16 @@ function poiStyle({ fill, stroke, glyph, glyphFill }) {
       textAlign: 'center',
       textBaseline: 'middle',
       offsetY: 0.5,  // pixel-perfect centering of the glyph in the disc
+    }),
+  });
+}
+
+function poiEmphasisRing(strokeColor) {
+  return new ol.style.Style({
+    image: new ol.style.Circle({
+      radius: POI_EMPHASIS_RING_RADIUS,
+      fill: new ol.style.Fill({ color: 'rgba(255,255,255,0)' }),
+      stroke: new ol.style.Stroke({ color: strokeColor, width: 2 }),
     }),
   });
 }
@@ -1062,6 +1075,16 @@ const HOSPITAL_TIER_STYLES = Object.fromEntries(
   Object.entries(HOSPITAL_TIER_COLORS).map(([t, c]) =>
     [t, poiStyle({ fill: c.fill, stroke: c.stroke, glyph: 'H', glyphFill: '#fff' })])
 );
+
+function isMajorHospitalFeature(feature) {
+  return feature.get('_poiKind') === 'hospital' && feature.get('tier') === 'major';
+}
+function hospitalFeatureVisible(feature) {
+  if (feature.get('_poiKind') !== 'hospital') return true;
+  return isMajorHospitalFeature(feature)
+    ? poiEnabled.hospitalMajor
+    : poiEnabled.hospitalOther;
+}
 
 // Airport tiering — the `tier` property on each airport feature
 // (computed in scripts/build_overlays.py from the longest runway length and
@@ -1180,25 +1203,54 @@ const LTC_TIER_STYLES = Object.fromEntries(
 // poiEnabled drives the cluster source's geometryFunction. Toggles flip
 // these flags and call clusterSource.refresh() to re-cluster from scratch.
 const poiEnabled = {
-  airport: false, hospital: false, walmart: false,
+  airport: false,
+  hospitalMajor: false, hospitalOther: false,
+  walmart: false,
   militaryMajor: false, militaryOther: false,
   corrections: false, school: false, food: false, ltc: false,
 };
+
+function poiNeedsEmphasisRing(feature) {
+  return isMajorHospitalFeature(feature) || isMajorMilitaryFeature(feature);
+}
 
 // One-stop style resolver for single POI features (called when a cluster
 // wraps exactly one point). All eight kinds dispatch on `tier`.
 function resolvePoiStyle(feature) {
   const kind = feature.get('_poiKind');
   const tier = feature.get('tier');
-  if (kind === 'airport')     return AIRPORT_TIER_STYLES[tier]     || AIRPORT_TIER_STYLES.limited;
-  if (kind === 'hospital')    return HOSPITAL_TIER_STYLES[tier]    || HOSPITAL_TIER_STYLES.standard;
-  if (kind === 'walmart')     return WALMART_TIER_STYLES[tier]     || WALMART_TIER_STYLES.standard;
-  if (kind === 'military')    return MILITARY_TIER_STYLES[tier]    || MILITARY_TIER_STYLES.major;
-  if (kind === 'corrections') return CORRECTIONS_TIER_STYLES[tier] || CORRECTIONS_TIER_STYLES.standard;
-  if (kind === 'school')      return SCHOOL_TIER_STYLES[tier]      || SCHOOL_TIER_STYLES.standard;
-  if (kind === 'food')        return FOOD_TIER_STYLES[tier]        || FOOD_TIER_STYLES.standard;
-  if (kind === 'ltc')         return LTC_TIER_STYLES[tier]         || LTC_TIER_STYLES.standard;
-  return null;
+  let base = null;
+  let ringStroke = null;
+  if (kind === 'airport') {
+    base = AIRPORT_TIER_STYLES[tier] || AIRPORT_TIER_STYLES.limited;
+    ringStroke = (AIRPORT_TIER_COLORS[tier] || AIRPORT_TIER_COLORS.limited).stroke;
+  } else if (kind === 'hospital') {
+    base = HOSPITAL_TIER_STYLES[tier] || HOSPITAL_TIER_STYLES.standard;
+    ringStroke = (HOSPITAL_TIER_COLORS[tier] || HOSPITAL_TIER_COLORS.standard).stroke;
+  } else if (kind === 'walmart') {
+    base = WALMART_TIER_STYLES[tier] || WALMART_TIER_STYLES.standard;
+    ringStroke = (WALMART_TIER_COLORS[tier] || WALMART_TIER_COLORS.standard).stroke;
+  } else if (kind === 'military') {
+    base = MILITARY_TIER_STYLES[tier] || MILITARY_TIER_STYLES.major;
+    ringStroke = (MILITARY_TIER_COLORS[tier] || MILITARY_TIER_COLORS.major).stroke;
+  } else if (kind === 'corrections') {
+    base = CORRECTIONS_TIER_STYLES[tier] || CORRECTIONS_TIER_STYLES.standard;
+    ringStroke = (CORRECTIONS_TIER_COLORS[tier] || CORRECTIONS_TIER_COLORS.standard).stroke;
+  } else if (kind === 'school') {
+    base = SCHOOL_TIER_STYLES[tier] || SCHOOL_TIER_STYLES.standard;
+    ringStroke = (SCHOOL_TIER_COLORS[tier] || SCHOOL_TIER_COLORS.standard).stroke;
+  } else if (kind === 'food') {
+    base = FOOD_TIER_STYLES[tier] || FOOD_TIER_STYLES.standard;
+    ringStroke = (FOOD_TIER_COLORS[tier] || FOOD_TIER_COLORS.standard).stroke;
+  } else if (kind === 'ltc') {
+    base = LTC_TIER_STYLES[tier] || LTC_TIER_STYLES.standard;
+    ringStroke = (LTC_TIER_COLORS[tier] || LTC_TIER_COLORS.standard).stroke;
+  }
+  if (!base) return null;
+  if (poiNeedsEmphasisRing(feature)) {
+    return [poiEmphasisRing(ringStroke), base];
+  }
+  return base;
 }
 
 // ----- Generic count-bubble style -----
@@ -1288,17 +1340,25 @@ for (const cfg of POI_KINDS) {
         const otherEl = document.getElementById('military-other-count');
         if (majorEl) majorEl.textContent = `(${majorN.toLocaleString()})`;
         if (otherEl) otherEl.textContent = `(${otherN.toLocaleString()})`;
+      } else if (cfg.kind === 'hospital') {
+        const majorN = feats.filter((f) => isMajorHospitalFeature(f)).length;
+        const otherN = feats.length - majorN;
+        const majorEl = document.getElementById('hospital-major-count');
+        const otherEl = document.getElementById('hospital-other-count');
+        if (majorEl) majorEl.textContent = `(${majorN.toLocaleString()})`;
+        if (otherEl) otherEl.textContent = `(${otherN.toLocaleString()})`;
       } else {
         const countEl = document.getElementById(cfg.panelId + '-count');
         if (countEl) countEl.textContent = `(${feats.length.toLocaleString()})`;
       }
       // If the user flipped this kind's toggle on before its data finished
       // loading, kick the cluster source so it picks the new features up.
-      if (cfg.kind === 'military'
-          ? (poiEnabled.militaryMajor || poiEnabled.militaryOther)
-          : poiEnabled[cfg.kind]) {
-        poiClusterSource.refresh();
-      }
+      const kindActive = cfg.kind === 'military'
+        ? (poiEnabled.militaryMajor || poiEnabled.militaryOther)
+        : cfg.kind === 'hospital'
+          ? (poiEnabled.hospitalMajor || poiEnabled.hospitalOther)
+          : poiEnabled[cfg.kind];
+      if (kindActive) poiClusterSource.refresh();
     })
     .catch((err) => {
       console.warn(`[poi:${cfg.kind}] load failed:`, err);
@@ -1320,6 +1380,8 @@ const poiClusterSource = new ol.source.Cluster({
     const kind = feature.get('_poiKind');
     if (kind === 'military') {
       if (!militaryFeatureVisible(feature)) return null;
+    } else if (kind === 'hospital') {
+      if (!hospitalFeatureVisible(feature)) return null;
     } else if (!poiEnabled[kind]) {
       return null;
     }
@@ -1349,7 +1411,9 @@ map.addLayer(poiClusterLayer);
 // "any enabled?" predicate, and force the cluster source to recompute
 // (refresh() re-runs the geometryFunction over every feature).
 function anyPoiEnabled() {
-  return poiEnabled.airport || poiEnabled.hospital || poiEnabled.walmart
+  return poiEnabled.airport
+      || poiEnabled.hospitalMajor || poiEnabled.hospitalOther
+      || poiEnabled.walmart
       || poiEnabled.militaryMajor || poiEnabled.militaryOther
       || poiEnabled.corrections || poiEnabled.school
       || poiEnabled.food || poiEnabled.ltc;
@@ -1366,7 +1430,6 @@ function setPoiToggle(key, panelId, checked, { skipSave = false } = {}) {
 
 const POI_TOGGLE_SPECS = [
   { key: 'airport',     panelId: 'airports' },
-  { key: 'hospital',    panelId: 'hospitals' },
   { key: 'walmart',     panelId: 'walmarts' },
   { key: 'corrections', panelId: 'corrections' },
   { key: 'school',      panelId: 'schools' },
@@ -1378,6 +1441,12 @@ for (const cfg of POI_TOGGLE_SPECS) {
     setPoiToggle(cfg.key, cfg.panelId, e.target.checked);
   });
 }
+document.getElementById('toggle-hospital-major').addEventListener('change', (e) => {
+  setPoiToggle('hospitalMajor', 'hospital-major', e.target.checked);
+});
+document.getElementById('toggle-hospital-other').addEventListener('change', (e) => {
+  setPoiToggle('hospitalOther', 'hospital-other', e.target.checked);
+});
 document.getElementById('toggle-military-major').addEventListener('change', (e) => {
   setPoiToggle('militaryMajor', 'military-major', e.target.checked);
 });
@@ -1700,10 +1769,22 @@ function setWeatherLayer(panelId, on, { skipSave = false } = {}) {
   if (!skipSave) scheduleSaveMapState();
 }
 
+function migrateSavedPoiState(poi) {
+  if (!poi) return poi;
+  const next = { ...poi };
+  if (next.hospital && next.hospitalMajor === undefined) {
+    next.hospitalMajor = !!next.hospital;
+    next.hospitalOther = !!next.hospital;
+  }
+  delete next.hospital;
+  return next;
+}
+
 function restoreMapState(state) {
   if (!state) return;
   _restoringMapState = true;
   try {
+    state = { ...state, poi: migrateSavedPoiState(state.poi) };
     applyBasemap(state.basemap || 'none', { skipSave: true });
     tintToggleEl.checked = !!state.countryTint;
     countryTintActive = !!state.countryTint;
@@ -1726,6 +1807,8 @@ function restoreMapState(state) {
     for (const cfg of POI_TOGGLE_SPECS) {
       setPoiToggle(cfg.key, cfg.panelId, !!state.poi?.[cfg.key], { skipSave: true });
     }
+    setPoiToggle('hospitalMajor', 'hospital-major', !!state.poi?.hospitalMajor, { skipSave: true });
+    setPoiToggle('hospitalOther', 'hospital-other', !!state.poi?.hospitalOther, { skipSave: true });
     setPoiToggle('militaryMajor', 'military-major', !!state.poi?.militaryMajor, { skipSave: true });
     setPoiToggle('militaryOther', 'military-other', !!state.poi?.militaryOther, { skipSave: true });
 
@@ -1765,6 +1848,8 @@ function resetMapToDefaults() {
     for (const cfg of POI_TOGGLE_SPECS) {
       setPoiToggle(cfg.key, cfg.panelId, false, { skipSave: true });
     }
+    setPoiToggle('hospitalMajor', 'hospital-major', false, { skipSave: true });
+    setPoiToggle('hospitalOther', 'hospital-other', false, { skipSave: true });
     setPoiToggle('militaryMajor', 'military-major', false, { skipSave: true });
     setPoiToggle('militaryOther', 'military-other', false, { skipSave: true });
 

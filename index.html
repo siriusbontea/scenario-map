@@ -126,11 +126,14 @@
         via Overpass API (<code>amenity=hospital|clinic</code>, ODbL). HIFLD and ODHF have no coverage outside US/CA.
       </div>
       <div class="info-row info-row--note">
-        Hospital tier (<span class="poi-tier-dot" style="background:#B11226"></span>Major /
+        Hospital map toggles split <b>major hospitals</b> (trauma centres,
+        large acute-care facilities) from <b>other hospitals</b> (standard
+        acute and limited clinics). Marker color
+        (<span class="poi-tier-dot" style="background:#B11226"></span>Major /
         <span class="poi-tier-dot" style="background:#E07B00"></span>Standard /
-        <span class="poi-tier-dot" style="background:#E8A87C"></span>Limited) is derived at fetch time:
-        HIFLD uses <code>TRAUMA</code>+<code>TYPE</code>+<code>BEDS</code>; ODHF uses facility-name
-        keyword match; OSM uses <code>emergency</code>/<code>amenity</code> tags.
+        <span class="poi-tier-dot" style="background:#E8A87C"></span>Limited)
+        still reflects capability tier. Major hospitals and major military
+        bases show an emphasis ring on the map.
       </div>
       <div class="info-row">
         <b>Walmart stores</b> —
@@ -280,9 +283,9 @@
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-airports">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#023E8A"></span>
-          <span style="background:#0077B6"></span>
-          <span style="background:#00B4D8"></span>
+          <span class="poi-swatch-seg" style="background:#023E8A;color:#fff">✈</span>
+          <span class="poi-swatch-seg" style="background:#0077B6;color:#fff">✈</span>
+          <span class="poi-swatch-seg" style="background:#00B4D8;color:#fff">✈</span>
         </span>
         Military-capable airfields
         <span id="airports-count" class="poi-count"></span>
@@ -293,26 +296,33 @@
         <span><span class="poi-tier-dot" style="background:#00B4D8"></span>C-130</span>
       </div>
       <label class="weather-toggle">
-        <input type="checkbox" id="toggle-hospitals">
+        <input type="checkbox" id="toggle-hospital-major">
+        <span class="poi-swatch poi-swatch--emphasis" style="background:#B11226;border-color:#4a0000;color:#fff;--poi-ring:#4a0000" aria-hidden="true">H</span>
+        Major hospitals
+        <span id="hospital-major-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key poi-tier-key--note">
+        Trauma centres and large acute-care facilities — excludes clinics and small community hospitals.
+      </div>
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-hospital-other">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#B11226"></span>
-          <span style="background:#E07B00"></span>
-          <span style="background:#E8A87C"></span>
+          <span class="poi-swatch-seg" style="background:#E07B00;color:#fff">H</span>
+          <span class="poi-swatch-seg" style="background:#E8A87C;color:#fff">H</span>
         </span>
-        Hospitals
-        <span id="hospitals-count" class="poi-count"></span>
+        Other hospitals
+        <span id="hospital-other-count" class="poi-count"></span>
       </label>
       <div class="poi-tier-key">
-        <span><span class="poi-tier-dot" style="background:#B11226"></span>Major</span>
         <span><span class="poi-tier-dot" style="background:#E07B00"></span>Standard</span>
         <span><span class="poi-tier-dot" style="background:#E8A87C"></span>Limited</span>
       </div>
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-walmarts">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#FFC220"></span>
-          <span style="background:#0071CE"></span>
-          <span style="background:#5DA9E9"></span>
+          <span class="poi-swatch-seg" style="background:#FFC220;color:#0071CE">W</span>
+          <span class="poi-swatch-seg" style="background:#0071CE;color:#FFC220">W</span>
+          <span class="poi-swatch-seg" style="background:#5DA9E9;color:#fff">W</span>
         </span>
         Walmart stores
         <span id="walmarts-count" class="poi-count"></span>
@@ -327,7 +337,7 @@
            setting layers seeded for BoldQuest 26 TTX modelling. -->
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-military-major">
-        <span class="poi-swatch" style="background:#3F4D2F;border-color:#1F2818" aria-hidden="true"></span>
+        <span class="poi-swatch poi-swatch--emphasis" style="background:#3F4D2F;border-color:#1F2818;color:#fff;--poi-ring:#1F2818" aria-hidden="true">★</span>
         Major military installations
         <span id="military-major-count" class="poi-count"></span>
       </label>
@@ -337,9 +347,8 @@
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-military-other">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#7A8450"></span>
-          <span style="background:#B5C18E"></span>
-          <span style="background:#7A8450"></span>
+          <span class="poi-swatch-seg" style="background:#7A8450;color:#fff">★</span>
+          <span class="poi-swatch-seg" style="background:#B5C18E;color:#fff">★</span>
         </span>
         Other military sites
         <span id="military-other-count" class="poi-count"></span>
@@ -352,9 +361,9 @@
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-corrections">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#2F3E46"></span>
-          <span style="background:#52796F"></span>
-          <span style="background:#84A98C"></span>
+          <span class="poi-swatch-seg" style="background:#2F3E46;color:#fff">P</span>
+          <span class="poi-swatch-seg" style="background:#52796F;color:#fff">P</span>
+          <span class="poi-swatch-seg" style="background:#84A98C;color:#fff">P</span>
         </span>
         Correctional facilities
         <span id="corrections-count" class="poi-count"></span>
@@ -368,9 +377,9 @@
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-schools">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#5E2A84"></span>
-          <span style="background:#8E6CB0"></span>
-          <span style="background:#C4A7E0"></span>
+          <span class="poi-swatch-seg" style="background:#5E2A84;color:#fff">S</span>
+          <span class="poi-swatch-seg" style="background:#8E6CB0;color:#fff">S</span>
+          <span class="poi-swatch-seg" style="background:#C4A7E0;color:#fff">S</span>
         </span>
         Schools
         <span id="schools-count" class="poi-count"></span>
@@ -384,9 +393,9 @@
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-food">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#5C3317"></span>
-          <span style="background:#8B5A2B"></span>
-          <span style="background:#C68E5E"></span>
+          <span class="poi-swatch-seg" style="background:#5C3317;color:#fff">F</span>
+          <span class="poi-swatch-seg" style="background:#8B5A2B;color:#fff">F</span>
+          <span class="poi-swatch-seg" style="background:#C68E5E;color:#fff">F</span>
         </span>
         Food production
         <span id="food-count" class="poi-count"></span>
@@ -400,9 +409,9 @@
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-ltc">
         <span class="poi-swatch poi-swatch-strip" aria-hidden="true">
-          <span style="background:#9D2A4E"></span>
-          <span style="background:#C76B89"></span>
-          <span style="background:#E8B6C1"></span>
+          <span class="poi-swatch-seg" style="background:#9D2A4E;color:#fff">L</span>
+          <span class="poi-swatch-seg" style="background:#C76B89;color:#fff">L</span>
+          <span class="poi-swatch-seg" style="background:#E8B6C1;color:#fff">L</span>
         </span>
         Long-term care
         <span id="ltc-count" class="poi-count"></span>
