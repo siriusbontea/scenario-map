@@ -204,25 +204,6 @@ countriesSource.once('featuresloadend', () => {
     }
   }
 
-  // Compute area-weighted centroid (shoelace) of each polygon's outer
-  // ring in projected EPSG:3978 meters, and add a Point feature there.
-  for (const { poly, label } of byName.values()) {
-    const ring = poly.getLinearRing(0).getCoordinates();
-    let a = 0, cx = 0, cy = 0;
-    for (let i = 0; i < ring.length - 1; i++) {
-      const [x0, y0] = ring[i], [x1, y1] = ring[i + 1];
-      const cross = x0 * y1 - x1 * y0;
-      a  += cross;
-      cx += (x0 + x1) * cross;
-      cy += (y0 + y1) * cross;
-    }
-    a *= 0.5;
-    labelsSource.addFeature(new ol.Feature({
-      geometry: new ol.geom.Point([cx / (6 * a), cy / (6 * a)]),
-      label,
-    }));
-  }
-
   // Constrain panning: viewport can't extend more than 2000 km past
   // the country bounding box. EPSG:3978 units are meters, so buffer = 2e6.
   // smoothExtentConstraint stays at its default (true) so the edge feels
@@ -250,14 +231,43 @@ countriesSource.once('featuresloadend', () => {
   }
   bindViewPersistence();
   scenarioCountriesReady = true;
-  tagAllPoiScenarioCountries();
-  buildLegend(countryFeatures);
+  rebuildScenarioCountryGeoms(countryFeatures);
+  // Country labels + legend: defer one frame so map extent/view paint first.
+  requestAnimationFrame(() => {
+    for (const { poly, label } of byName.values()) {
+      const ring = poly.getLinearRing(0).getCoordinates();
+      let a = 0, cx = 0, cy = 0;
+      for (let i = 0; i < ring.length - 1; i++) {
+        const [x0, y0] = ring[i], [x1, y1] = ring[i + 1];
+        const cross = x0 * y1 - x1 * y0;
+        a  += cross;
+        cx += (x0 + x1) * cross;
+        cy += (y0 + y1) * cross;
+      }
+      a *= 0.5;
+      labelsSource.addFeature(new ol.Feature({
+        geometry: new ol.geom.Point([cx / (6 * a), cy / (6 * a)]),
+        label,
+      }));
+    }
+    buildLegend(countryFeatures);
+  });
 });
 
-// POI popups: replace dataset country codes (US, CA, …) with scenario names
-// (Olvana, Laurikin, …) from scenario.geojson polygons.
+// POI popups: resolve scenario country on click only (not bulk-tagged at load —
+// ~13k spatial lookups blocked the main thread and hung refresh).
 let scenarioCountriesReady = false;
+let scenarioCountryGeoms = [];
 const SCENARIO_FICTION_PRIORITY = ['Olvana', 'Donovia', 'Laurikin', 'Houdini'];
+
+function rebuildScenarioCountryGeoms(countryFeatures) {
+  scenarioCountryGeoms = [];
+  for (const f of countryFeatures) {
+    const geom = f.getGeometry();
+    const name = f.get('NAME');
+    if (geom && name) scenarioCountryGeoms.push({ name, geom });
+  }
+}
 
 function pickScenarioCountryName(names) {
   const uniq = [...new Set(names.filter((n) => n && n !== 'Ocean'))];
@@ -270,20 +280,11 @@ function pickScenarioCountryName(names) {
 
 function scenarioCountryAtCoord(coord3978) {
   if (!coord3978 || !scenarioCountriesReady) return null;
-  const feats = countriesSource.getFeaturesAtCoordinate(coord3978);
-  return pickScenarioCountryName(feats.map((f) => f.get('NAME')));
-}
-
-function tagPoiFeatureScenarioCountry(feature) {
-  const coord = feature.getGeometry()?.getCoordinates();
-  if (!coord) return;
-  const name = scenarioCountryAtCoord(coord);
-  if (name) feature.set('scenario_country', name);
-}
-
-function tagAllPoiScenarioCountries() {
-  if (!scenarioCountriesReady) return;
-  for (const f of poiCombinedSource.getFeatures()) tagPoiFeatureScenarioCountry(f);
+  const hits = [];
+  for (const { name, geom } of scenarioCountryGeoms) {
+    if (geom.intersectsCoordinate(coord3978)) hits.push(name);
+  }
+  return pickScenarioCountryName(hits);
 }
 
 function popupScenarioCountryRow(scenarioName) {
@@ -1546,11 +1547,10 @@ for (const cfg of POI_KINDS) {
       return r.json();
     })
     .then(gj => {
+      // Yield before parsing large GeoJSON so refresh can paint the map first.
+      requestAnimationFrame(() => {
       const feats = _poiGeoJsonFormat.readFeatures(gj);
-      for (const f of feats) {
-        f.set('_poiKind', cfg.kind);
-        tagPoiFeatureScenarioCountry(f);
-      }
+      for (const f of feats) f.set('_poiKind', cfg.kind);
       poiCombinedSource.addFeatures(feats);
       if (cfg.kind === 'military') {
         const majorN = feats.filter((f) => isMajorMilitaryFeature(f)).length;
@@ -1577,7 +1577,8 @@ for (const cfg of POI_KINDS) {
         : cfg.kind === 'hospital'
           ? (poiEnabled.hospitalMajor || poiEnabled.hospitalOther)
           : poiEnabled[cfg.kind];
-      if (kindActive) poiClusterSource.refresh();
+      if (kindActive) schedulePoiClusterRefresh();
+      });
     })
     .catch((err) => {
       console.warn(`[poi:${cfg.kind}] load failed:`, err);
@@ -1638,12 +1639,22 @@ function anyPoiEnabled() {
       || poiEnabled.food || poiEnabled.ltc;
 }
 
-function setPoiToggle(key, panelId, checked, { skipSave = false } = {}) {
+let _poiClusterRefreshQueued = false;
+function schedulePoiClusterRefresh() {
+  if (_poiClusterRefreshQueued) return;
+  _poiClusterRefreshQueued = true;
+  requestAnimationFrame(() => {
+    _poiClusterRefreshQueued = false;
+    if (anyPoiEnabled()) poiClusterSource.refresh();
+  });
+}
+
+function setPoiToggle(key, panelId, checked, { skipSave = false, skipRefresh = false } = {}) {
   poiEnabled[key] = checked;
   const el = document.getElementById('toggle-' + panelId);
   if (el) el.checked = checked;
   poiClusterLayer.setVisible(anyPoiEnabled());
-  poiClusterSource.refresh();
+  if (!skipRefresh) schedulePoiClusterRefresh();
   if (!skipSave) scheduleSaveMapState();
 }
 
@@ -1776,7 +1787,7 @@ function renderPoiPopup(feature) {
   const geom = feature.getGeometry();
   const coord = geom ? geom.getCoordinates() : null;
   const geoRows = coord ? popupGeoRowsFromCoord(coord) : '';
-  const scenarioName = p.scenario_country || (coord ? scenarioCountryAtCoord(coord) : null);
+  const scenarioName = coord ? scenarioCountryAtCoord(coord) : null;
   const scenarioRow = popupScenarioCountryRow(scenarioName);
   return `
     <h3>${title}</h3>
@@ -2031,12 +2042,14 @@ function restoreMapState(state) {
     else stopMaster();
 
     for (const cfg of POI_TOGGLE_SPECS) {
-      setPoiToggle(cfg.key, cfg.panelId, !!state.poi?.[cfg.key], { skipSave: true });
+      setPoiToggle(cfg.key, cfg.panelId, !!state.poi?.[cfg.key], { skipSave: true, skipRefresh: true });
     }
-    setPoiToggle('hospitalMajor', 'hospital-major', !!state.poi?.hospitalMajor, { skipSave: true });
-    setPoiToggle('hospitalOther', 'hospital-other', !!state.poi?.hospitalOther, { skipSave: true });
-    setPoiToggle('militaryMajor', 'military-major', !!state.poi?.militaryMajor, { skipSave: true });
-    setPoiToggle('militaryOther', 'military-other', !!state.poi?.militaryOther, { skipSave: true });
+    setPoiToggle('hospitalMajor', 'hospital-major', !!state.poi?.hospitalMajor, { skipSave: true, skipRefresh: true });
+    setPoiToggle('hospitalOther', 'hospital-other', !!state.poi?.hospitalOther, { skipSave: true, skipRefresh: true });
+    setPoiToggle('militaryMajor', 'military-major', !!state.poi?.militaryMajor, { skipSave: true, skipRefresh: true });
+    setPoiToggle('militaryOther', 'military-other', !!state.poi?.militaryOther, { skipSave: true, skipRefresh: true });
+    poiClusterLayer.setVisible(anyPoiEnabled());
+    schedulePoiClusterRefresh();
 
     if (state.rangePreset && RANGE_PRESETS[state.rangePreset]) {
       setRangePreset(state.rangePreset, { skipSave: true });
@@ -2075,12 +2088,14 @@ function resetMapToDefaults() {
     applyMasterFrame();
 
     for (const cfg of POI_TOGGLE_SPECS) {
-      setPoiToggle(cfg.key, cfg.panelId, false, { skipSave: true });
+      setPoiToggle(cfg.key, cfg.panelId, false, { skipSave: true, skipRefresh: true });
     }
-    setPoiToggle('hospitalMajor', 'hospital-major', false, { skipSave: true });
-    setPoiToggle('hospitalOther', 'hospital-other', false, { skipSave: true });
-    setPoiToggle('militaryMajor', 'military-major', false, { skipSave: true });
-    setPoiToggle('militaryOther', 'military-other', false, { skipSave: true });
+    setPoiToggle('hospitalMajor', 'hospital-major', false, { skipSave: true, skipRefresh: true });
+    setPoiToggle('hospitalOther', 'hospital-other', false, { skipSave: true, skipRefresh: true });
+    setPoiToggle('militaryMajor', 'military-major', false, { skipSave: true, skipRefresh: true });
+    setPoiToggle('militaryOther', 'military-other', false, { skipSave: true, skipRefresh: true });
+    poiClusterLayer.setVisible(false);
+    schedulePoiClusterRefresh();
 
     setRangePreset('long', { skipSave: true });
     setRangeToolActive(false, { skipSave: true });
