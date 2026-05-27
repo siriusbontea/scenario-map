@@ -249,8 +249,49 @@ countriesSource.once('featuresloadend', () => {
     _suppressViewSave = false;
   }
   bindViewPersistence();
+  scenarioCountriesReady = true;
+  tagAllPoiScenarioCountries();
   buildLegend(countryFeatures);
 });
+
+// POI popups: replace dataset country codes (US, CA, …) with scenario names
+// (Olvana, Laurikin, …) from scenario.geojson polygons.
+let scenarioCountriesReady = false;
+const SCENARIO_FICTION_PRIORITY = ['Olvana', 'Donovia', 'Laurikin', 'Houdini'];
+
+function pickScenarioCountryName(names) {
+  const uniq = [...new Set(names.filter((n) => n && n !== 'Ocean'))];
+  if (!uniq.length) return null;
+  for (const n of SCENARIO_FICTION_PRIORITY) {
+    if (uniq.includes(n)) return n;
+  }
+  return uniq[0];
+}
+
+function scenarioCountryAtCoord(coord3978) {
+  if (!coord3978 || !scenarioCountriesReady) return null;
+  const feats = countriesSource.getFeaturesAtCoordinate(coord3978);
+  return pickScenarioCountryName(feats.map((f) => f.get('NAME')));
+}
+
+function tagPoiFeatureScenarioCountry(feature) {
+  const coord = feature.getGeometry()?.getCoordinates();
+  if (!coord) return;
+  const name = scenarioCountryAtCoord(coord);
+  if (name) feature.set('scenario_country', name);
+}
+
+function tagAllPoiScenarioCountries() {
+  if (!scenarioCountriesReady) return;
+  for (const f of poiCombinedSource.getFeatures()) tagPoiFeatureScenarioCountry(f);
+}
+
+function popupScenarioCountryRow(scenarioName) {
+  if (!scenarioName) return '';
+  const group = (COUNTRY_STYLE[scenarioName] || DEFAULT_STYLE).group;
+  return `
+      <span class="k">Country</span><span class="v">${scenarioName}${group ? ` <span class="badge">${group}</span>` : ''}</span>`;
+}
 
 // ----- Cursor coordinate readout: lat/lon (with N/S/E/W) + MGRS -----
 const coordsLatLon = document.getElementById('coords-latlon');
@@ -1506,7 +1547,10 @@ for (const cfg of POI_KINDS) {
     })
     .then(gj => {
       const feats = _poiGeoJsonFormat.readFeatures(gj);
-      for (const f of feats) f.set('_poiKind', cfg.kind);
+      for (const f of feats) {
+        f.set('_poiKind', cfg.kind);
+        tagPoiFeatureScenarioCountry(f);
+      }
       poiCombinedSource.addFeatures(feats);
       if (cfg.kind === 'military') {
         const majorN = feats.filter((f) => isMajorMilitaryFeature(f)).length;
@@ -1661,7 +1705,6 @@ function renderPoiPopup(feature) {
     const loc = [p.city, p.region].filter(Boolean).join(', ');
     rows = `
       ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
-      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
       ${p.beds ? `<span class="k">Beds</span><span class="v">${p.beds}</span>` : ''}
       ${p.trauma ? `<span class="k">Trauma</span><span class="v">${p.trauma}</span>` : ''}
       ${p.helipad === 'Y' ? `<span class="k">Helipad</span><span class="v">Yes</span>` : ''}
@@ -1680,9 +1723,7 @@ function renderPoiPopup(feature) {
     const tier = MILITARY_TIER_COLORS[p.tier] || MILITARY_TIER_COLORS.major;
     badge = `MILITARY · ${tier.label.toUpperCase()}`;
     rows = `
-      ${p.kind ? `<span class="k">OSM tag</span><span class="v">military=${p.kind}</span>` : ''}
       ${p.operator ? `<span class="k">Operator</span><span class="v">${p.operator}</span>` : ''}
-      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
       ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
   } else if (kind === 'corrections') {
     title = p.name || 'Correctional facility';
@@ -1691,7 +1732,6 @@ function renderPoiPopup(feature) {
     const loc = [p.city, p.region].filter(Boolean).join(', ');
     rows = `
       ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
-      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
       ${p.type ? `<span class="k">Type</span><span class="v">${p.type}</span>` : ''}
       ${p.security ? `<span class="k">Security</span><span class="v">${p.security}</span>` : ''}
       ${p.population ? `<span class="k">Population</span><span class="v">${p.population.toLocaleString()}</span>` : ''}
@@ -1704,7 +1744,6 @@ function renderPoiPopup(feature) {
     const loc = [p.city, p.region].filter(Boolean).join(', ');
     rows = `
       ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
-      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
       ${p.kind ? `<span class="k">Kind</span><span class="v">${p.kind}</span>` : ''}
       ${p.grades ? `<span class="k">Grades</span><span class="v">${p.grades}</span>` : ''}
       ${p.enrollment ? `<span class="k">Enrollment</span><span class="v">${p.enrollment.toLocaleString()}</span>` : ''}
@@ -1718,7 +1757,6 @@ function renderPoiPopup(feature) {
     rows = `
       ${p.address ? `<span class="k">Address</span><span class="v">${p.address}</span>` : ''}
       ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
-      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
       ${p.est_id ? `<span class="k">Est ID</span><span class="v">${p.est_id}</span>` : ''}
       ${p.activities ? `<span class="k">Activities</span><span class="v">${p.activities}</span>` : ''}
       ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
@@ -1729,7 +1767,6 @@ function renderPoiPopup(feature) {
     const loc = [p.city, p.region].filter(Boolean).join(', ');
     rows = `
       ${loc ? `<span class="k">Location</span><span class="v">${loc}</span>` : ''}
-      ${p.country ? `<span class="k">Country</span><span class="v">${p.country}</span>` : ''}
       ${p.facility ? `<span class="k">Type</span><span class="v">${p.facility}</span>` : ''}
       ${p.population ? `<span class="k">Population</span><span class="v">${p.population.toLocaleString()}</span>` : ''}
       ${p.source ? `<span class="k">Source</span><span class="v">${p.source}</span>` : ''}`;
@@ -1737,12 +1774,16 @@ function renderPoiPopup(feature) {
     return null;
   }
   const geom = feature.getGeometry();
-  const geoRows = geom ? popupGeoRowsFromCoord(geom.getCoordinates()) : '';
+  const coord = geom ? geom.getCoordinates() : null;
+  const geoRows = coord ? popupGeoRowsFromCoord(coord) : '';
+  const scenarioName = p.scenario_country || (coord ? scenarioCountryAtCoord(coord) : null);
+  const scenarioRow = popupScenarioCountryRow(scenarioName);
   return `
     <h3>${title}</h3>
     <div class="kv">
       <span class="k">Type</span><span class="v"><span class="badge">${badge}</span></span>
       ${geoRows}
+      ${scenarioRow}
       ${rows}
     </div>`;
 }
