@@ -27,6 +27,14 @@ function hexAlpha(hex, alpha) {
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
+function blendHexWithWhite(hex, amount) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const t = Math.max(0, Math.min(1, amount));
+  const w = 1 - t;
+  return `rgb(${Math.round(r * t + 255 * w)}, ${Math.round(g * t + 255 * w)}, ${Math.round(b * t + 255 * w)})`;
+}
 
 // ----- Projection: EPSG:3978 (NAD83 / Canada Atlas Lambert) -----
 // Lambert Conformal Conic, central meridian -95°W, standard parallels
@@ -385,6 +393,14 @@ const popupOverlay = new ol.Overlay({
 map.addOverlay(popupOverlay);
 popupClose.addEventListener('click', () => { popupEl.style.display = 'none'; });
 
+/** Tint popup background + border to match scenario country palette. */
+function applyPopupCountryTheme(countryName) {
+  const s = (countryName && COUNTRY_STYLE[countryName]) || DEFAULT_STYLE;
+  popupEl.style.setProperty('--popup-tint', blendHexWithWhite(s.fill, 0.18));
+  popupEl.style.setProperty('--popup-border', s.stroke);
+  popupEl.style.setProperty('--popup-divider', hexAlpha(s.fill, 0.35));
+}
+
 function fmtArea(m2) {
   if (!m2 || m2 <= 0) return '—';
   return (m2 / 1e6).toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' km²';
@@ -407,6 +423,7 @@ map.on('click', (evt) => {
   const name  = p.LABEL_TXT || p.NAME || '(unnamed)';
   const type  = p.TYPE || '—';
   const group = (COUNTRY_STYLE[p.NAME] || DEFAULT_STYLE).group;
+  applyPopupCountryTheme(p.NAME);
   popupBody.innerHTML = `
     <h3>${name}</h3>
     <div class="kv">
@@ -1834,6 +1851,8 @@ map.on('click', (evt) => {
   const poi = unwrapPoi(hit);
   const html = renderPoiPopup(poi);
   if (!html) return;
+  const poiCoord = poi.getGeometry()?.getCoordinates();
+  applyPopupCountryTheme(poiCoord ? scenarioCountryAtCoord(poiCoord) : null);
   popupBody.innerHTML = html;
   popupEl.style.display = '';
   // Position the popup at the feature's actual point geometry, not the
