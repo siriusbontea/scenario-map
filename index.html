@@ -617,11 +617,13 @@
     </div>
   </div>
 
-  <div id="popup" class="ol-popup ol-popup--tip-left" style="display:none">
-    <div class="ol-popup-tip" aria-hidden="true"></div>
-    <div class="ol-popup-inner">
-      <span class="ol-popup-close" id="popup-close">×</span>
-      <div id="popup-content"></div>
+  <div id="popup" class="ol-popup-root" style="display:none">
+    <div id="popup-bubble" class="ol-popup-bubble ol-popup--tip-left">
+      <div class="ol-popup-tip" aria-hidden="true"></div>
+      <div class="ol-popup-inner">
+        <span class="ol-popup-close" id="popup-close">×</span>
+        <div id="popup-content"></div>
+      </div>
     </div>
   </div>
 

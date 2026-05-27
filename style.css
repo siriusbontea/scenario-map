@@ -64,17 +64,32 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
   min-height: 12px;  /* reserve space so the box doesn't jump on first move */
 }
 
-/* Popup (ol.Overlay) — side arrow tip like Leaflet tooltip on kentucky-owls */
-.ol-popup {
+/* Popup — zero-size overlay root; tip vertex sits on the map coordinate */
+.ol-popup-root {
   --popup-tip: #ffee00;
   position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.ol-popup-bubble {
+  position: absolute;
+  top: 50%;
   display: flex;
   align-items: center;
+  transform: translateY(-50%);
   font-size: 12px;
-  min-width: 0;
-  max-width: none;
   pointer-events: none;
   filter: drop-shadow(0 2px 6px rgba(0,0,0,0.28));
+}
+/* Tip-left: bubble extends east; tip vertex on the anchor point */
+.ol-popup-bubble.ol-popup--tip-left {
+  left: 0;
+}
+/* Tip-right: bubble extends west; tip vertex on the anchor point */
+.ol-popup-bubble.ol-popup--tip-right {
+  right: 0;
+  flex-direction: row-reverse;
 }
 .ol-popup-inner {
   position: relative;
@@ -93,33 +108,28 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
   border-top: 10px solid transparent;
   border-bottom: 10px solid transparent;
 }
-/* Tip on the left — popup sits to the right of the anchor point */
 .ol-popup--tip-left .ol-popup-tip {
   border-right: 12px solid var(--popup-tip);
   margin-right: -1px;
-}
-/* Tip on the right — popup sits to the left of the anchor point */
-.ol-popup--tip-right {
-  flex-direction: row-reverse;
 }
 .ol-popup--tip-right .ol-popup-tip {
   border-left: 12px solid var(--popup-tip);
   margin-left: -1px;
 }
-.ol-popup h3 {
+.ol-popup-inner h3 {
   margin: 0 0 6px 0; font-size: 14px;
   border-bottom: 1px solid var(--popup-divider, #eee);
   padding-bottom: 4px;
 }
-.ol-popup .kv { display: grid; grid-template-columns: 80px 1fr; gap: 2px 8px; line-height: 1.6; }
-.ol-popup .k { color: #888; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-.ol-popup .v { color: #222; }
-.ol-popup .v-coords {
+.ol-popup-inner .kv { display: grid; grid-template-columns: 80px 1fr; gap: 2px 8px; line-height: 1.6; }
+.ol-popup-inner .k { color: #888; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+.ol-popup-inner .v { color: #222; }
+.ol-popup-inner .v-coords {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
   letter-spacing: 0.2px;
 }
-.ol-popup .badge {
+.ol-popup-inner .badge {
   display: inline-block; padding: 1px 6px; border-radius: 3px;
   font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
   background: #e8f1ff; color: #1f4e8c;

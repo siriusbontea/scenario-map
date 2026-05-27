@@ -380,13 +380,15 @@ map.on('pointermove', (evt) => {
 
 // ----- Click popup -----
 const popupEl     = document.getElementById('popup');
+const popupBubble = document.getElementById('popup-bubble');
 const popupBody   = document.getElementById('popup-content');
 const popupClose  = document.getElementById('popup-close');
 const popupOverlay = new ol.Overlay({
   element: popupEl,
-  positioning: 'center-left',
-  offset: [8, 0],
-  stopEvent: true,
+  // Zero-size root: every positioning mode maps the anchor to the coordinate.
+  positioning: 'center-center',
+  offset: [0, 0],
+  stopEvent: false,
   autoPan: { animation: { duration: 250 }, margin: 40 },
 });
 map.addOverlay(popupOverlay);
@@ -398,22 +400,20 @@ function hidePopup() {
   popupOverlay.setPosition(undefined);
 }
 
-/** Side-mounted yellow tip points at the anchor (kentucky-owls Leaflet style). */
+/** Side-mounted yellow tip vertex sits on the click coordinate. */
 function positionAnchoredPopup(coord) {
   const pixel = map.getPixelFromCoordinate(coord);
   const mapW = map.getTargetElement().clientWidth;
   const tipRight = pixel[0] > mapW * 0.52;
-  popupEl.classList.toggle('ol-popup--tip-right', tipRight);
-  popupEl.classList.toggle('ol-popup--tip-left', !tipRight);
-  popupOverlay.setPositioning(tipRight ? 'center-right' : 'center-left');
-  popupOverlay.setOffset(tipRight ? [-8, 0] : [8, 0]);
+  popupBubble.classList.toggle('ol-popup--tip-right', tipRight);
+  popupBubble.classList.toggle('ol-popup--tip-left', !tipRight);
   popupOverlay.setPosition(coord);
 }
 
 function showAnchoredPopup(coord) {
   popupAnchorCoord = coord.slice();
+  popupEl.style.display = 'block';
   positionAnchoredPopup(coord);
-  popupEl.style.display = 'flex';
 }
 
 popupClose.addEventListener('click', hidePopup);
