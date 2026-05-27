@@ -901,8 +901,105 @@ tintSliderEl.addEventListener('input', (e) => {
 // =============================================================
 // Concentric geodesic rings from the click point; preset selects radii.
 // Long: 250 / 500 / 750 / 1000 km. Short: 50 / 100 / 150 / 200 / 250 km.
-// Rings are GEODESIC: every vertex is the click point offset by the target
-// distance along a great circle, then projected into EPSG:3978.
+// Vertices use WGS84/NAD83 Vincenty direct (ellipsoid ground distance), then
+// project into EPSG:3978. On a Lambert map the rings look slightly oval and
+// ruler-measured map distance ≠ label km — that is projection, not error.
+const WGS84_A = 6378137;
+const WGS84_F = 1 / 298.257223563;
+const WGS84_B = (1 - WGS84_F) * WGS84_A;
+
+/** Vincenty direct — [lon, lat] degrees at ground distance (m) and bearing (rad). */
+function geodesicOffset(centerLL, distanceM, bearingRad) {
+  const phi1 = centerLL[1] * Math.PI / 180;
+  const lam1 = centerLL[0] * Math.PI / 180;
+  const sina = Math.sin(bearingRad);
+  const cosa = Math.cos(bearingRad);
+  const tanU1 = (1 - WGS84_F) * Math.tan(phi1);
+  const cosU1 = 1 / Math.sqrt(1 + tanU1 * tanU1);
+  const sinU1 = tanU1 * cosU1;
+  const sig1 = Math.atan2(tanU1, cosa);
+  const sina1 = cosU1 * sina;
+  const cos2a = 1 - sina1 * sina1;
+  const u2 = cos2a * (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B * WGS84_B);
+  const A = 1 + u2 / 16384 * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)));
+  const B = u2 / 1024 * (256 + u2 * (-128 + u2 * (74 - 47 * u2)));
+  let sig = distanceM / (WGS84_B * A);
+  let cos2sigM;
+  for (let iter = 0; iter < 100; iter++) {
+    cos2sigM = Math.cos(2 * sig1 + sig);
+    const sinsig = Math.sin(sig);
+    const cossig = Math.cos(sig);
+    const dsig = B * sina1 * (cossig * (cos2sigM + B / 4 * (cossig * (-1 + 2 * cos2sigM * cos2sigM)
+        - B / 6 * cos2sigM * (-3 + 4 * sinsig * sinsig) * (-3 + 4 * cos2sigM * cos2sigM))));
+    const sigp = sig;
+    sig = distanceM / (WGS84_B * A) + dsig;
+    if (Math.abs(sig - sigp) < 1e-12) break;
+  }
+  const sinsig = Math.sin(sig);
+  const cossig = Math.cos(sig);
+  const x = sinU1 * sinsig - cosU1 * cossig * cosa;
+  const phi2 = Math.atan2(
+    sinU1 * cossig + cosU1 * sinsig * cosa,
+    (1 - WGS84_F) * Math.sqrt(sina1 * sina1 + x * x),
+  );
+  const lam = Math.atan2(sinsig * sina, cosU1 * cossig - sinU1 * sinsig * cosa);
+  const C = WGS84_F / 16 * cos2a * (4 + WGS84_F * (4 - 3 * cos2a));
+  const dLam = lam - (1 - C) * WGS84_F * sina1
+      * (sig + C * sinsig * (cos2sigM + C * cossig * (-1 + 2 * cos2sigM * cos2sigM)));
+  return [(lam1 + dLam) * 180 / Math.PI, phi2 * 180 / Math.PI];
+}
+
+/** Vincenty inverse — ellipsoid ground distance (m) between [lon,lat] pairs. */
+function geodesicDistanceM(c1, c2) {
+  const phi1 = c1[1] * Math.PI / 180;
+  const phi2 = c2[1] * Math.PI / 180;
+  const L = (c2[0] - c1[0]) * Math.PI / 180;
+  const tanU1 = (1 - WGS84_F) * Math.tan(phi1);
+  const tanU2 = (1 - WGS84_F) * Math.tan(phi2);
+  const U1 = Math.atan(tanU1);
+  const U2 = Math.atan(tanU2);
+  const sinU1 = Math.sin(U1);
+  const cosU1 = Math.cos(U1);
+  const sinU2 = Math.sin(U2);
+  const cosU2 = Math.cos(U2);
+  let lam = L;
+  let sinLam, cosLam, sinsig, cossig, sig, sina, cos2a, cos2sigM;
+  for (let iter = 0; iter < 200; iter++) {
+    sinLam = Math.sin(lam);
+    cosLam = Math.cos(lam);
+    sinsig = Math.sqrt((cosU2 * sinLam) ** 2 + (cosU1 * sinU2 - sinU1 * cosU2 * cosLam) ** 2);
+    if (sinsig === 0) return 0;
+    cossig = sinU1 * sinU2 + cosU1 * cosU2 * cosLam;
+    sig = Math.atan2(sinsig, cossig);
+    sina = cosU1 * cosU2 * sinLam / sinsig;
+    cos2a = 1 - sina * sina;
+    cos2sigM = cossig - 2 * sinU1 * sinU2 / cos2a;
+    if (Number.isNaN(cos2sigM)) cos2sigM = 0;
+    const C = WGS84_F / 16 * cos2a * (4 + WGS84_F * (4 - 3 * cos2a));
+    const lamp = lam;
+    lam = L + (1 - C) * WGS84_F * sina
+        * (sig + C * sinsig * (cos2sigM + C * cossig * (-1 + 2 * cos2sigM * cos2sigM)));
+    if (Math.abs(lam - lamp) < 1e-12) break;
+  }
+  const u2 = cos2a * (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B * WGS84_B);
+  const A = 1 + u2 / 16384 * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)));
+  const B = u2 / 1024 * (256 + u2 * (-128 + u2 * (74 - 47 * u2)));
+  const dsig = B * sina * (cossig * (cos2sigM + B / 4 * (cossig * (-1 + 2 * cos2sigM * cos2sigM)
+      - B / 6 * cos2sigM * (-3 + 4 * sinsig * sinsig) * (-3 + 4 * cos2sigM * cos2sigM))));
+  return WGS84_B * A * (sig - dsig);
+}
+
+function maxRingGeodesicErrorM(centerLL, ringCoords3978, targetM) {
+  let maxErr = 0;
+  const n = ringCoords3978.length;
+  for (let i = 0; i < n; i += 16) {
+    const ll = ol.proj.toLonLat(ringCoords3978[i], 'EPSG:3978');
+    const d = geodesicDistanceM(centerLL, ll);
+    maxErr = Math.max(maxErr, Math.abs(d - targetM));
+  }
+  return maxErr;
+}
+
 const RANGE_PRESETS = {
   long:  { radiiM: [250_000, 500_000, 750_000, 1_000_000], maxKm: 1000 },
   short: { radiiM: [50_000, 100_000, 150_000, 200_000, 250_000], maxKm: 250 },
@@ -924,6 +1021,8 @@ function rangePresetHintHtml() {
   const radii = getRangeRadiiM().map(formatRangeLabel).join(' / ');
   const max = RANGE_PRESETS[rangePreset]?.maxKm || 1000;
   return `Drops concentric rings at <b>${radii}</b> from the click point (max <b>${max} km</b>). `
+    + 'Distances are <b>ground km</b> (WGS84 geodesic); on this Lambert map rings look '
+    + 'slightly oval and map-scale rulers will not match labels exactly. '
     + 'Toggle <b>Range Rings</b> on, click the map to place; click again to relocate. '
     + 'Use <b>Clear</b> to remove them.';
 }
@@ -979,27 +1078,27 @@ function placeRangeRings(coord) {
   center.set('rangeType', 'center');
   rangeSource.addFeature(center);
 
-  // Compute click point in lon/lat for geodesic offsets along the sphere.
   const centerLL = ol.proj.toLonLat(coord, 'EPSG:3978');
 
   for (const r of getRangeRadiiM()) {
-    // Build the ring by walking 0..2π in bearing, offsetting r meters
-    // along a great circle, and projecting each vertex back to EPSG:3978.
     const ringCoords = new Array(RANGE_RING_STEPS + 1);
     for (let i = 0; i <= RANGE_RING_STEPS; i++) {
       const bearing = (i / RANGE_RING_STEPS) * 2 * Math.PI;
-      const destLL  = ol.sphere.offset(centerLL, r, bearing);
+      const destLL  = geodesicOffset(centerLL, r, bearing);
       ringCoords[i] = ol.proj.fromLonLat(destLL, 'EPSG:3978');
+    }
+    const maxErr = maxRingGeodesicErrorM(centerLL, ringCoords, r);
+    if (maxErr > 5) {
+      console.warn(`[range] ${formatRangeLabel(r)} ring geodesic sample error: ${maxErr.toFixed(1)} m`);
     }
     const ring = new ol.Feature({
       geometry: new ol.geom.Polygon([ringCoords]),
     });
     ring.set('rangeType', 'ring');
+    ring.set('geodesicErrorM', maxErr);
     rangeSource.addFeature(ring);
 
-    // Label at exactly r meters NE of center (bearing = π/4) — same
-    // geodesic logic, so the label sits on the ring not just near it.
-    const labelLL    = ol.sphere.offset(centerLL, r, Math.PI / 4);
+    const labelLL = geodesicOffset(centerLL, r, Math.PI / 4);
     const labelCoord = ol.proj.fromLonLat(labelLL, 'EPSG:3978');
     const label = new ol.Feature({
       geometry: new ol.geom.Point(labelCoord),
