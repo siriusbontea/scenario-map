@@ -294,12 +294,12 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
   min-width: 0;
 }
 /* Passenger-flow swatch — three arc strokes by width. */
-.poi-swatch--flow {
-  display: flex;
+.poi-swatch-stack.poi-swatch--flow {
+  display: inline-flex;
   flex-direction: column;
   justify-content: center;
   gap: 1px;
-  width: 18px;
+  width: 16px;
   height: 16px;
 }
 .poi-flow-line {
@@ -313,16 +313,52 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
 .poi-flow-line--mid   { border-top-width: 2px; width: 85%; margin-left: 8%;  opacity: 0.7; }
 .poi-flow-line--thick { border-top-width: 3px; width: 100%; opacity: 1; }
 
-/* Compact tier legend under the hospital toggle: three small dots + labels,
-   single line, indented under the checkbox column. */
-.poi-tier-key {
+/* POI panel — flex rows so checkbox, swatch, label, and count share a baseline. */
+#poi-panel.weather-panel {
+  min-width: 248px;
+  max-width: 280px;
+}
+#poi-panel .weather-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+  line-height: 1.25;
+}
+#poi-panel .weather-toggle input[type="checkbox"] {
+  margin: 0;
+  flex: 0 0 13px;
+  width: 13px;
+  height: 13px;
+}
+#poi-panel .weather-toggle > .poi-swatch-stack,
+#poi-panel .weather-toggle > .poi-swatch-strip {
+  margin: 0;
+  flex: 0 0 16px;
+}
+#poi-panel .poi-toggle-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.25;
+}
+#poi-panel .poi-toggle-text .poi-count {
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* Compact tier legend under each toggle — indented past checkbox + swatch. */
+#poi-panel .poi-tier-key {
   display: flex; gap: 10px; flex-wrap: wrap;
-  margin: 0 0 4px 26px;   /* aligns under the row's text, past checkbox+swatch */
+  margin: 0 0 5px;
+  padding-left: 35px;   /* 13px checkbox + 6px gap + 16px swatch */
   font-size: 10px; color: #555;
   line-height: 1.5;
 }
-.poi-tier-key--note {
-  display: block; max-width: 240px; line-height: 1.35; color: #666;
+#poi-panel .poi-tier-key--note {
+  display: block;
+  max-width: none;
+  line-height: 1.35;
+  color: #666;
 }
 .poi-tier-key > span { display: inline-flex; align-items: center; gap: 4px; }
 .poi-tier-dot {
