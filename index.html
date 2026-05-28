@@ -340,73 +340,6 @@
     <div class="weather-panel" id="poi-panel" hidden>
       <h4>Point Overlays</h4>
       <label class="weather-toggle">
-        <input type="checkbox" id="toggle-airports">
-        <span class="poi-swatch-stack" aria-hidden="true">
-          <span class="poi-swatch-strip poi-swatch-strip--bg">
-            <span class="poi-swatch-seg" style="background:#023E8A"></span>
-            <span class="poi-swatch-seg" style="background:#0077B6"></span>
-            <span class="poi-swatch-seg" style="background:#00B4D8"></span>
-          </span>
-          <span class="poi-swatch-glyph" style="color:#fff">✈</span>
-        </span>
-        Military-capable airfields
-        <span id="airports-count" class="poi-count"></span>
-      </label>
-      <div class="poi-tier-key">
-        <span><span class="poi-tier-dot" style="background:#023E8A"></span>C-5</span>
-        <span><span class="poi-tier-dot" style="background:#0077B6"></span>C-17</span>
-        <span><span class="poi-tier-dot" style="background:#00B4D8"></span>C-130</span>
-      </div>
-      <label class="weather-toggle">
-        <input type="checkbox" id="toggle-hospital-major">
-        <span class="poi-swatch-stack poi-swatch--map" style="--poi-fill:#B11226;--poi-stroke:#4a0000;--poi-ring:#4a0000" aria-hidden="true">
-          <span class="poi-swatch-ring"></span>
-          <span class="poi-swatch-disc"><span class="poi-swatch-glyph" style="color:#fff">H</span></span>
-        </span>
-        Major hospitals
-        <span id="hospital-major-count" class="poi-count"></span>
-      </label>
-      <div class="poi-tier-key poi-tier-key--note">
-        Trauma centres and large acute-care facilities — excludes clinics and small community hospitals.
-      </div>
-      <label class="weather-toggle">
-        <input type="checkbox" id="toggle-hospital-other">
-        <span class="poi-swatch-stack" aria-hidden="true">
-          <span class="poi-swatch-strip poi-swatch-strip--bg">
-            <span class="poi-swatch-seg" style="background:#E07B00"></span>
-            <span class="poi-swatch-seg" style="background:#E8A87C"></span>
-          </span>
-          <span class="poi-swatch-glyph" style="color:#fff">H</span>
-        </span>
-        Other hospitals
-        <span id="hospital-other-count" class="poi-count"></span>
-      </label>
-      <div class="poi-tier-key">
-        <span><span class="poi-tier-dot" style="background:#E07B00"></span>Standard</span>
-        <span><span class="poi-tier-dot" style="background:#E8A87C"></span>Limited</span>
-      </div>
-      <label class="weather-toggle">
-        <input type="checkbox" id="toggle-walmarts">
-        <span class="poi-swatch-stack" aria-hidden="true">
-          <span class="poi-swatch-strip poi-swatch-strip--bg">
-            <span class="poi-swatch-seg" style="background:#FFC220"></span>
-            <span class="poi-swatch-seg" style="background:#0071CE"></span>
-            <span class="poi-swatch-seg" style="background:#5DA9E9"></span>
-          </span>
-          <span class="poi-swatch-glyph" style="color:#0071CE">W</span>
-        </span>
-        Walmart stores
-        <span id="walmarts-count" class="poi-count"></span>
-      </label>
-      <div class="poi-tier-key">
-        <span><span class="poi-tier-dot" style="background:#FFC220"></span>Supercenter</span>
-        <span><span class="poi-tier-dot" style="background:#0071CE"></span>Discount</span>
-        <span><span class="poi-tier-dot" style="background:#5DA9E9"></span>Neighborhood</span>
-      </div>
-
-      <!-- Pathogen-spread overlays (added 2026-05-19) — five congregate-
-           setting layers seeded for BoldQuest 26 TTX modelling. -->
-      <label class="weather-toggle">
         <input type="checkbox" id="toggle-military-major">
         <span class="poi-swatch-stack poi-swatch--map" style="--poi-fill:#3F4D2F;--poi-stroke:#1F2818;--poi-ring:#1F2818" aria-hidden="true">
           <span class="poi-swatch-ring"></span>
@@ -435,6 +368,56 @@
         <span><span class="poi-tier-dot" style="background:#B5C18E"></span>Range/Training</span>
       </div>
 
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-airports">
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#023E8A"></span>
+            <span class="poi-swatch-seg" style="background:#0077B6"></span>
+            <span class="poi-swatch-seg" style="background:#00B4D8"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">✈</span>
+        </span>
+        Military-capable airfields
+        <span id="airports-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#023E8A"></span>C-5</span>
+        <span><span class="poi-tier-dot" style="background:#0077B6"></span>C-17</span>
+        <span><span class="poi-tier-dot" style="background:#00B4D8"></span>C-130</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-hospital-major">
+        <span class="poi-swatch-stack poi-swatch--map" style="--poi-fill:#B11226;--poi-stroke:#4a0000;--poi-ring:#4a0000" aria-hidden="true">
+          <span class="poi-swatch-ring"></span>
+          <span class="poi-swatch-disc"><span class="poi-swatch-glyph" style="color:#fff">H</span></span>
+        </span>
+        Major hospitals
+        <span id="hospital-major-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key poi-tier-key--note">
+        Trauma centres and large acute-care facilities — excludes clinics and small community hospitals.
+      </div>
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-hospital-other">
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#E07B00"></span>
+            <span class="poi-swatch-seg" style="background:#E8A87C"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#fff">H</span>
+        </span>
+        Other hospitals
+        <span id="hospital-other-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#E07B00"></span>Standard</span>
+        <span><span class="poi-tier-dot" style="background:#E8A87C"></span>Limited</span>
+      </div>
+
+      <!-- Pathogen-spread overlays (added 2026-05-19) — five congregate-
+           setting layers seeded for BoldQuest 26 TTX modelling. -->
       <label class="weather-toggle">
         <input type="checkbox" id="toggle-corrections">
         <span class="poi-swatch-stack" aria-hidden="true">
@@ -509,6 +492,25 @@
         <span><span class="poi-tier-dot" style="background:#9D2A4E"></span>Nursing</span>
         <span><span class="poi-tier-dot" style="background:#C76B89"></span>Assisted</span>
         <span><span class="poi-tier-dot" style="background:#E8B6C1"></span>Hospice/Day</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-walmarts">
+        <span class="poi-swatch-stack" aria-hidden="true">
+          <span class="poi-swatch-strip poi-swatch-strip--bg">
+            <span class="poi-swatch-seg" style="background:#FFC220"></span>
+            <span class="poi-swatch-seg" style="background:#0071CE"></span>
+            <span class="poi-swatch-seg" style="background:#5DA9E9"></span>
+          </span>
+          <span class="poi-swatch-glyph" style="color:#0071CE">W</span>
+        </span>
+        Walmart stores
+        <span id="walmarts-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key">
+        <span><span class="poi-tier-dot" style="background:#FFC220"></span>Supercenter</span>
+        <span><span class="poi-tier-dot" style="background:#0071CE"></span>Discount</span>
+        <span><span class="poi-tier-dot" style="background:#5DA9E9"></span>Neighborhood</span>
       </div>
 
       <div class="poi-source">Sources: OurAirports, HIFLD, StatCan ODHF, CMS, USDA FSIS, CFIA, OpenStreetMap. See <b>i</b> panel for full attribution.</div>

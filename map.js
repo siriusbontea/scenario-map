@@ -1848,11 +1848,11 @@ function setPoiToggle(key, panelId, checked, { skipSave = false, skipRefresh = f
 
 const POI_TOGGLE_SPECS = [
   { key: 'airport',     panelId: 'airports' },
-  { key: 'walmart',     panelId: 'walmarts' },
   { key: 'corrections', panelId: 'corrections' },
   { key: 'school',      panelId: 'schools' },
   { key: 'food',        panelId: 'food' },
   { key: 'ltc',         panelId: 'ltc' },
+  { key: 'walmart',     panelId: 'walmarts' },
 ];
 for (const cfg of POI_TOGGLE_SPECS) {
   document.getElementById('toggle-' + cfg.panelId).addEventListener('change', (e) => {
