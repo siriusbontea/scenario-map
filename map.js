@@ -1228,6 +1228,30 @@ function geodesicDistanceM(c1, c2) {
   return WGS84_B * A * (sig - dsig);
 }
 
+/** Initial forward azimuth (radians) from c0 to c1 on the WGS84 ellipsoid. */
+function geodesicInitialBearingRad(c0, c1) {
+  const phi1 = c0[1] * Math.PI / 180;
+  const phi2 = c1[1] * Math.PI / 180;
+  const dLam = (c1[0] - c0[0]) * Math.PI / 180;
+  const y = Math.sin(dLam) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2)
+      - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLam);
+  return Math.atan2(y, x);
+}
+
+/** Sample a geodesic arc between two lon/lat points (degrees). */
+function geodesicArcWgs84(c0, c1, segments = 48) {
+  const totalM = geodesicDistanceM(c0, c1);
+  if (totalM < 1000) return [c0.slice(), c1.slice()];
+  const brg = geodesicInitialBearingRad(c0, c1);
+  const pts = [c0.slice()];
+  for (let i = 1; i < segments; i++) {
+    pts.push(geodesicOffset(c0, totalM * i / segments, brg));
+  }
+  pts.push(c1.slice());
+  return pts;
+}
+
 function maxRingGeodesicErrorM(centerLL, ringCoords3978, targetM) {
   let maxErr = 0;
   const n = ringCoords3978.length;
@@ -1609,6 +1633,7 @@ const LTC_TIER_STYLES = Object.fromEntries(
 // these flags and call clusterSource.refresh() to re-cluster from scratch.
 const poiEnabled = {
   airport: false,
+  passengerFlows: false,
   hospitalMajor: false, hospitalOther: false,
   walmart: false,
   militaryMajor: false, militaryOther: false,
@@ -1815,6 +1840,131 @@ const poiClusterLayer = new ol.layer.Vector({
 });
 map.addLayer(poiClusterLayer);
 
+// ----- BTS T-100 passenger-flow arcs (airport pair LineStrings) -----
+const FLOW_MAX_RENDER = 800;
+let flowPassengerBounds = { min: 1, max: 1 };
+
+const airportFlowSource = new ol.source.Vector();
+const _flowGeoJsonFormat = new ol.format.GeoJSON({
+  dataProjection:    'EPSG:4326',
+  featureProjection: 'EPSG:3978',
+});
+
+function flowEdgeWidth(passengers) {
+  const { min, max } = flowPassengerBounds;
+  if (max <= min) return 2;
+  const t = (Math.log10(Math.max(passengers, 1)) - Math.log10(min))
+      / (Math.log10(max) - Math.log10(min));
+  return 0.8 + 5.5 * Math.max(0, Math.min(1, t));
+}
+
+function flowEdgeStyle(feature) {
+  const pax = feature.get('passengers') || 0;
+  const { min, max } = flowPassengerBounds;
+  let t = 0.5;
+  if (max > min) {
+    t = (Math.log10(Math.max(pax, 1)) - Math.log10(min))
+        / (Math.log10(max) - Math.log10(min));
+    t = Math.max(0, Math.min(1, t));
+  }
+  const color = `rgba(255, ${Math.round(196 - 96 * t)}, 0, ${0.22 + 0.58 * t})`;
+  return new ol.style.Style({
+    stroke: new ol.style.Stroke({
+      color,
+      width: flowEdgeWidth(pax),
+      lineCap: 'round',
+      lineJoin: 'round',
+    }),
+  });
+}
+
+const airportFlowLayer = new ol.layer.Vector({
+  source: airportFlowSource,
+  visible: false,
+  zIndex: 80,
+  style: flowEdgeStyle,
+});
+map.addLayer(airportFlowLayer);
+
+function arcifyFlowFeature(feature) {
+  const geom = feature.getGeometry();
+  if (!geom || geom.getType() !== 'LineString') return;
+  const coords3978 = geom.getCoordinates();
+  if (!coords3978 || coords3978.length < 2) return;
+  const c0 = ol.proj.toLonLat(coords3978[0], 'EPSG:3978');
+  const c1 = ol.proj.toLonLat(coords3978[coords3978.length - 1], 'EPSG:3978');
+  const arc3978 = geodesicArcWgs84(c0, c1).map((ll) => ol.proj.fromLonLat(ll, 'EPSG:3978'));
+  feature.setGeometry(new ol.geom.LineString(arc3978));
+}
+
+fetch('data/airport_edges.geojson')
+  .then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then((gj) => {
+    requestAnimationFrame(() => {
+      const rawFeats = _flowGeoJsonFormat.readFeatures(gj);
+      const sorted = rawFeats.sort(
+        (a, b) => (b.get('passengers') || 0) - (a.get('passengers') || 0),
+      );
+      const top = sorted.slice(0, FLOW_MAX_RENDER);
+      const paxVals = top.map((f) => f.get('passengers') || 0).filter((n) => n > 0);
+      if (paxVals.length) {
+        flowPassengerBounds = {
+          min: Math.max(1, Math.min(...paxVals)),
+          max: Math.max(...paxVals),
+        };
+      }
+      for (const f of top) arcifyFlowFeature(f);
+      airportFlowSource.addFeatures(top);
+      const countEl = document.getElementById('passenger-flows-count');
+      if (countEl) {
+        const total = rawFeats.length;
+        countEl.textContent = total > top.length
+          ? `(${top.length.toLocaleString()} of ${total.toLocaleString()})`
+          : `(${top.length.toLocaleString()})`;
+      }
+      if (poiEnabled.passengerFlows) airportFlowLayer.setVisible(true);
+    });
+  })
+  .catch((err) => {
+    console.warn('[passenger-flows] load failed:', err);
+    const countEl = document.getElementById('passenger-flows-count');
+    if (countEl) countEl.textContent = '(no data)';
+  });
+
+function setPassengerFlowsToggle(checked, { skipSave = false } = {}) {
+  poiEnabled.passengerFlows = checked;
+  const el = document.getElementById('toggle-passenger-flows');
+  if (el) el.checked = checked;
+  airportFlowLayer.setVisible(checked && airportFlowSource.getFeatures().length > 0);
+  if (!skipSave) scheduleSaveMapState();
+}
+
+document.getElementById('toggle-passenger-flows').addEventListener('change', (e) => {
+  setPassengerFlowsToggle(e.target.checked);
+});
+
+function renderFlowPopup(feature) {
+  const p = feature.getProperties();
+  const o = p.origin_iata || '?';
+  const d = p.dest_iata || '?';
+  const pax = p.passengers ? Number(p.passengers).toLocaleString() : '—';
+  const deps = p.departures ? Number(p.departures).toLocaleString() : '';
+  const yrs = (p.year_min && p.year_max)
+    ? (p.year_min === p.year_max ? String(p.year_min) : `${p.year_min}–${p.year_max}`)
+    : '';
+  return `
+    <div class="popup-title">${o} → ${d}</div>
+    <div class="popup-badge">PASSENGER FLOW · BTS T-100</div>
+    <div class="popup-grid">
+      <span class="k">Passengers</span><span class="v">${pax}</span>
+      ${deps ? `<span class="k">Departures</span><span class="v">${deps}</span>` : ''}
+      ${yrs ? `<span class="k">Years</span><span class="v">${yrs}</span>` : ''}
+    </div>`;
+}
+
 // Toggle handlers — flip the enabled flag, sync layer visibility to the
 // "any enabled?" predicate, and force the cluster source to recompute
 // (refresh() re-runs the geometryFunction over every feature).
@@ -1989,6 +2139,21 @@ function renderPoiPopup(feature) {
 
 map.on('click', (evt) => {
   if (rangeToolActive) return;  // range tool already handled by earlier listener
+
+  if (airportFlowLayer.getVisible()) {
+    const flowHit = map.forEachFeatureAtPixel(evt.pixel,
+      (fr, layer) => layer === airportFlowLayer ? fr : null,
+      { hitTolerance: 6 },
+    );
+    if (flowHit) {
+      const mid = flowHit.getGeometry()?.getCoordinateAt?.(0.5);
+      applyPopupCountryTheme(mid ? scenarioCountryAtCoord(mid) : null);
+      popupBody.innerHTML = renderFlowPopup(flowHit);
+      showAnchoredPopup(mid || evt.coordinate);
+      return;
+    }
+  }
+
   if (!poiClusterLayer.getVisible()) return;
   const hit = map.forEachFeatureAtPixel(evt.pixel,
     (fr, layer) => layer === poiClusterLayer ? fr : null,
@@ -2031,12 +2196,22 @@ map.on('click', (evt) => {
 // Extend hover: pointer cursor over POI markers and cluster bubbles.
 map.on('pointermove', (evt) => {
   if (evt.dragging || rangeToolActive) return;
-  if (!poiClusterLayer.getVisible()) return;
-  const f = map.forEachFeatureAtPixel(evt.pixel,
-    (fr, layer) => layer === poiClusterLayer ? fr : null,
-    { hitTolerance: 4 },
-  );
-  if (f) map.getTargetElement().style.cursor = 'pointer';
+  let cursor = '';
+  if (airportFlowLayer.getVisible()) {
+    const flowHit = map.forEachFeatureAtPixel(evt.pixel,
+      (fr, layer) => layer === airportFlowLayer ? fr : null,
+      { hitTolerance: 6 },
+    );
+    if (flowHit) cursor = 'pointer';
+  }
+  if (!cursor && poiClusterLayer.getVisible()) {
+    const f = map.forEachFeatureAtPixel(evt.pixel,
+      (fr, layer) => layer === poiClusterLayer ? fr : null,
+      { hitTolerance: 4 },
+    );
+    if (f) cursor = 'pointer';
+  }
+  map.getTargetElement().style.cursor = cursor;
 });
 
 // ----- POI dropdown (mirrors the existing layers dropdown behavior) -----
@@ -2263,6 +2438,7 @@ function restoreMapState(state) {
     setPoiToggle('hospitalOther', 'hospital-other', !!state.poi?.hospitalOther, { skipSave: true, skipRefresh: true });
     setPoiToggle('militaryMajor', 'military-major', !!state.poi?.militaryMajor, { skipSave: true, skipRefresh: true });
     setPoiToggle('militaryOther', 'military-other', !!state.poi?.militaryOther, { skipSave: true, skipRefresh: true });
+    setPassengerFlowsToggle(!!state.poi?.passengerFlows, { skipSave: true });
     poiClusterLayer.setVisible(anyPoiEnabled());
     schedulePoiClusterRefresh();
 
@@ -2305,6 +2481,7 @@ function resetMapToDefaults() {
     setPoiToggle('hospitalOther', 'hospital-other', false, { skipSave: true, skipRefresh: true });
     setPoiToggle('militaryMajor', 'military-major', false, { skipSave: true, skipRefresh: true });
     setPoiToggle('militaryOther', 'military-other', false, { skipSave: true, skipRefresh: true });
+    setPassengerFlowsToggle(false, { skipSave: true });
     poiClusterLayer.setVisible(false);
     schedulePoiClusterRefresh();
 

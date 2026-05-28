@@ -83,7 +83,8 @@ python3 -m http.server 8000
     ├── schools.geojson     Pre-clipped, tiered schools (enrollment ≥ 100)
     ├── food.geojson        Pre-clipped, tiered food production facilities
     ├── ltc.geojson         Pre-clipped, tiered long-term care facilities
-    ├── airport_edges.csv   BTS T-100 passenger-flow sidecar (sidecar only)
+    ├── airport_edges.csv   BTS T-100 passenger-flow sidecar
+    ├── airport_edges.geojson  BTS T-100 flow arcs (map overlay + sidecar)
     ├── _geocode_cache.json Cached US Census + Nominatim geocodes
     ├── ne_land.geojson     Natural Earth land reference
     ├── ocean.geojson       Reference ocean polygon
@@ -115,7 +116,7 @@ python3 -m http.server 8000
 | Long-term care (US) | [HIFLD Open Nursing Homes](https://hifld-geoplatform.opendata.arcgis.com/) (wraps CMS Provider Information) | Public domain |
 | Long-term care (CA) | [StatCan ODHF v1.1](https://www.statcan.gc.ca/en/lode/databases/odhf) (filtered to long-term care facility types) | Statistics Canada Open License |
 | Long-term care (GL, IS) | [OpenStreetMap](https://www.openstreetmap.org/copyright) via Overpass API (`amenity=nursing_home` + `social_facility=*`) | © OSM contributors, ODbL |
-| Airport passenger-flow sidecar | [BTS T-100 Segment](https://www.transtats.bts.gov/Tables.asp?DB_ID=110) — user-pre-positioned ZIP | Public domain |
+| Airport passenger flows | [BTS T-100 Segment](https://www.transtats.bts.gov/Tables.asp?DB_ID=110) — user-pre-positioned ZIP; map overlay in `airport_edges.geojson` | Public domain |
 
 POI data is clipped to scenario land polygons at fetch time using a
 point-in-polygon test against `data/scenario.geojson`.
@@ -148,13 +149,14 @@ upstream sources. The script is idempotent — re-run any time to refresh.
   Nominatim usage policy. The first `food` build is therefore slow
   (~10 min for ~600 CA records); subsequent runs hit the local cache at
   `data/_geocode_cache.json` and complete in seconds.
-- **BTS T-100 sidecar.** The script reads a pre-positioned ZIP at
+- **BTS T-100 passenger flows.** The script reads a pre-positioned ZIP at
   `data/raw/T_T100_SEGMENT_ALL_CARRIER.zip`. Download once from BTS:
   visit <https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FIL>,
   choose Aviation → T-100 Segment (All Carriers), pick a year, save the
   ZIP into `data/raw/`. The build aggregates origin→dest passenger flows
   to airport-pair edges, retaining only pairs whose endpoints are both
-  in `airports.geojson`.
+  in `airports.geojson`, and writes both `data/airport_edges.csv` and
+  `data/airport_edges.geojson` (map overlay).
 
 ## Tech notes
 

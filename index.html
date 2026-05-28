@@ -248,13 +248,13 @@
         reflects clinical acuity, which proxies outbreak case-fatality risk.
       </div>
 
-      <div class="info-group">Sidecar (not rendered on map)</div>
       <div class="info-row">
-        <b>Airport passenger-flow edges</b> —
+        <b>Airport passenger flows</b> —
         <a href="https://www.transtats.bts.gov/Tables.asp?DB_ID=110&amp;DB_Name=Air%20Carrier%20Statistics"
            target="_blank" rel="noopener">BTS T-100 Segment data</a>,
-        aggregated to airport-pair flows in <code>data/airport_edges.csv</code>
-        for downstream metapopulation modelling.
+        aggregated to airport-pair flows in <code>data/airport_edges.geojson</code>
+        (and <code>airport_edges.csv</code> sidecar). Line width scales with annual
+        passengers; toggle under POI → Military-capable airfields.
       </div>
 
       <div class="info-footer">
@@ -385,6 +385,20 @@
         <span><span class="poi-tier-dot" style="background:#023E8A"></span>C-5</span>
         <span><span class="poi-tier-dot" style="background:#0077B6"></span>C-17</span>
         <span><span class="poi-tier-dot" style="background:#00B4D8"></span>C-130</span>
+      </div>
+
+      <label class="weather-toggle">
+        <input type="checkbox" id="toggle-passenger-flows">
+        <span class="poi-swatch-stack poi-swatch--flow" aria-hidden="true">
+          <span class="poi-flow-line poi-flow-line--thin"></span>
+          <span class="poi-flow-line poi-flow-line--mid"></span>
+          <span class="poi-flow-line poi-flow-line--thick"></span>
+        </span>
+        Passenger flows (BTS T-100)
+        <span id="passenger-flows-count" class="poi-count"></span>
+      </label>
+      <div class="poi-tier-key poi-tier-key--note">
+        Great-circle arcs between airfields; width ∝ annual passengers (top routes shown).
       </div>
 
       <label class="weather-toggle">

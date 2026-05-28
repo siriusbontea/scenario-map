@@ -293,6 +293,25 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, Bl
   flex: 1;
   min-width: 0;
 }
+/* Passenger-flow swatch — three arc strokes by width. */
+.poi-swatch--flow {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  width: 18px;
+  height: 16px;
+}
+.poi-flow-line {
+  display: block;
+  height: 0;
+  border-top-style: solid;
+  border-top-color: rgba(255, 170, 0, 0.85);
+  border-radius: 1px;
+}
+.poi-flow-line--thin  { border-top-width: 1px; width: 70%; margin-left: 15%; opacity: 0.45; }
+.poi-flow-line--mid   { border-top-width: 2px; width: 85%; margin-left: 8%;  opacity: 0.7; }
+.poi-flow-line--thick { border-top-width: 3px; width: 100%; opacity: 1; }
 
 /* Compact tier legend under the hospital toggle: three small dots + labels,
    single line, indented under the checkbox column. */
